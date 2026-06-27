@@ -46,15 +46,38 @@ def risk_by_tenure(db: Session, user: User) -> list[dict]:
     return result
 
 
-def risk_by_salary(db: Session, user: User) -> list[dict]:
-    groups = [
-        ("< 60K", 0, 60000),
-        ("60-80K", 60000, 80000),
-        ("80-100K", 80000, 100000),
-        ("100-120K", 100000, 120000),
-        ("120K+", 120000, 999999),
+def _salary_band_groups(employees: list[Employee]) -> list[tuple[str, float, float]]:
+    if not employees:
+        return [
+            ("< 60K", 0, 60_000),
+            ("60-80K", 60_000, 80_000),
+            ("80-100K", 80_000, 100_000),
+            ("100-120K", 100_000, 120_000),
+            ("120K+", 120_000, float("inf")),
+        ]
+
+    max_salary = max(float(employee.salary) for employee in employees)
+    if max_salary >= 500_000:
+        return [
+            ("< 500K RWF", 0, 500_000),
+            ("500K-1M", 500_000, 1_000_000),
+            ("1M-1.5M", 1_000_000, 1_500_000),
+            ("1.5M-2M", 1_500_000, 2_000_000),
+            ("2M+ RWF", 2_000_000, float("inf")),
+        ]
+
+    return [
+        ("< 60K", 0, 60_000),
+        ("60-80K", 60_000, 80_000),
+        ("80-100K", 80_000, 100_000),
+        ("100-120K", 100_000, 120_000),
+        ("120K+", 120_000, float("inf")),
     ]
+
+
+def risk_by_salary(db: Session, user: User) -> list[dict]:
     employees = _employee_query(db, user).all()
+    groups = _salary_band_groups(employees)
     result = []
     for label, min_salary, max_salary in groups:
         group = [e for e in employees if min_salary <= float(e.salary) < max_salary]
@@ -91,13 +114,16 @@ def risk_by_department(db: Session, user: User) -> list[dict]:
     for dept in departments:
         employees = _employee_query(db, user).filter(Employee.department_id == dept.id).all()
         avg_risk = sum(e.attrition_probability for e in employees) / len(employees) if employees else 0
+        high_risk_count = sum(1 for e in employees if e.attrition_risk == AttritionRisk.HIGH)
+        avg_satisfaction = sum(e.satisfaction_score for e in employees) / len(employees) if employees else 0
+        live_attrition_rate = round(high_risk_count / len(employees) * 100, 1) if employees else 0
         result.append(
             {
                 "department": dept.name.split(" ")[0],
                 "fullName": dept.name,
-                "attritionRate": dept.attrition_rate,
-                "satisfaction": round(dept.avg_satisfaction * 10, 1),
-                "headCount": dept.head_count,
+                "attritionRate": live_attrition_rate,
+                "satisfaction": round(avg_satisfaction, 1),
+                "headCount": len(employees),
                 "avgRisk": round(avg_risk, 1),
                 "employeeCount": len(employees),
             }

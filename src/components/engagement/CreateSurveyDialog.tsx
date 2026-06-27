@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { X, Plus, Trash2, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react';
+import { useCreateSurvey } from '@/hooks/useApi';
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,7 @@ interface CreateSurveyDialogProps {
 }
 
 export function CreateSurveyDialog({ open, onOpenChange }: CreateSurveyDialogProps) {
+  const createSurvey = useCreateSurvey();
   const [title, setTitle] = useState('');
   const [surveyType, setSurveyType] = useState('');
   const [targetAudience, setTargetAudience] = useState<string[]>([]);
@@ -77,7 +79,7 @@ export function CreateSurveyDialog({ open, onOpenChange }: CreateSurveyDialogPro
     onOpenChange(false);
   };
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     if (!title) {
       toast.error('Please enter a survey title');
       return;
@@ -90,15 +92,30 @@ export function CreateSurveyDialog({ open, onOpenChange }: CreateSurveyDialogPro
       toast.error('Please fill in all questions');
       return;
     }
-    toast.success('Survey launched successfully! (prototype)', {
-      description: `"${title}" is now live for ${targetAudience.length > 0 ? targetAudience.join(', ') : 'All Employees'}`
-    });
-    onOpenChange(false);
-    // Reset form
-    setTitle('');
-    setSurveyType('');
-    setTargetAudience([]);
-    setQuestions([{ id: '1', text: '', type: 'rating' }]);
+
+    try {
+      const audience = targetAudience.length > 0 ? targetAudience.join(', ') : 'All Employees';
+      await createSurvey.mutateAsync({
+        title,
+        type: surveyType,
+        audience,
+        anonymous,
+        questions: questions.map((question) => ({
+          text: question.text,
+          type: question.type,
+        })),
+      });
+      toast.success('Survey launched successfully', {
+        description: `"${title}" is live. Email invitations are being sent to employees.`,
+      });
+      onOpenChange(false);
+      setTitle('');
+      setSurveyType('');
+      setTargetAudience([]);
+      setQuestions([{ id: '1', text: '', type: 'rating' }]);
+    } catch {
+      toast.error('Failed to launch survey', { description: 'Please try again' });
+    }
   };
 
   return (
@@ -265,9 +282,10 @@ export function CreateSurveyDialog({ open, onOpenChange }: CreateSurveyDialogPro
           </Button>
           <Button 
             onClick={handleLaunch}
+            disabled={createSurvey.isPending}
             className="bg-primary hover:bg-primary/90 text-white"
           >
-            Launch Survey
+            {createSurvey.isPending ? 'Launching...' : 'Launch Survey'}
           </Button>
         </div>
       </DialogContent>

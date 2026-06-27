@@ -9,37 +9,33 @@ import {
   useSurveys,
   useFeedback,
   useKpis,
+  useSendPulseSurvey,
+  useSendQuickSurvey,
+  useSubmitFeedback,
 } from '@/hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { CreateSurveyDialog } from '@/components/engagement/CreateSurveyDialog';
+import { SurveyResponsesPanel } from '@/components/engagement/SurveyResponsesPanel';
 import {
   MessageSquare,
   Smile,
   Meh,
   Frown,
-  TrendingUp,
-  TrendingDown,
   Plus,
   Send,
-  BarChart3,
   Users,
   Heart,
-  Star,
   ThumbsUp,
   ThumbsDown,
   MessageCircle,
-  Calendar,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
+  Eye,
 } from 'lucide-react';
 import {
   LineChart,
@@ -54,35 +50,36 @@ import {
   PolarAngleAxis,
   PolarRadiusAxis,
   Radar,
-  BarChart,
-  Bar,
   ScatterChart,
   Scatter,
-  ZAxis,
   Cell,
 } from 'recharts';
 
-const surveyQuestions = [
-  'How satisfied are you with your current role?',
-  'Do you feel valued by your manager?',
-  'How would you rate work-life balance?',
-  'Do you see growth opportunities here?',
-  'Would you recommend this company?',
-];
+type FeedbackSentiment = 'positive' | 'neutral' | 'negative';
 
 export default function Engagement() {
   const [newQuestion, setNewQuestion] = useState('');
+  const [responseType, setResponseType] = useState('scale');
   const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackSentiment, setFeedbackSentiment] = useState<FeedbackSentiment>('neutral');
   const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
+  const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
+  const [selectedSurveyTitle, setSelectedSurveyTitle] = useState('');
 
   const { data: summary } = useEngagementSummary();
   const { data: engagementTrends = [] } = useEngagementTrends();
   const { data: sentimentData = [] } = useEngagementSentiment();
   const { data: engagementDimensions = [] } = useEngagementDimensions();
-  const { data: engagementVsAttrition = [] } = useEngagementVsAttrition();
+  const { data: engagementVsAttritionData } = useEngagementVsAttrition();
   const { data: surveysRaw = [] } = useSurveys();
   const { data: feedbackRaw = [] } = useFeedback();
   const { data: kpis } = useKpis();
+  const sendPulseSurvey = useSendPulseSurvey();
+  const sendQuickSurvey = useSendQuickSurvey();
+  const submitFeedback = useSubmitFeedback();
+
+  const engagementVsAttrition = engagementVsAttritionData?.points ?? [];
+  const attritionCorrelation = engagementVsAttritionData?.correlation;
 
   const surveys = useMemo(
     () =>
@@ -90,8 +87,8 @@ export default function Engagement() {
         id: String(s.id),
         name: String(s.title ?? s.name ?? 'Survey'),
         status: String(s.status ?? 'active'),
-        responses: 0,
-        total: kpis?.totalEmployees ?? 0,
+        responses: Number(s.responseCount ?? 0),
+        total: Number(s.totalEmployees ?? kpis?.totalEmployees ?? 0),
         endDate: String(s.endDate ?? '—'),
       })),
     [surveysRaw, kpis],
@@ -101,7 +98,7 @@ export default function Engagement() {
     () =>
       feedbackRaw.map((f) => ({
         id: String(f.id),
-        sentiment: 'neutral' as const,
+        sentiment: (String(f.sentiment ?? 'neutral') as FeedbackSentiment),
         text: String(f.message ?? ''),
         department: String(f.category ?? 'General'),
         date: f.submittedAt ? new Date(String(f.submittedAt)).toLocaleDateString() : '—',
@@ -119,24 +116,84 @@ export default function Engagement() {
     sentimentData.reduce((sum, d) => sum + Number(d.positive), 0) / (sentimentData.length || 1),
   );
 
+  const handleSendPulseSurvey = async () => {
+    try {
+      await sendPulseSurvey.mutateAsync();
+      toast.success('Pulse survey sent', {
+        description: 'Email invitations are being sent to employees.',
+      });
+    } catch {
+      toast.error('Failed to send pulse survey');
+    }
+  };
+
+  const handleSendQuickSurvey = async () => {
+    if (!newQuestion.trim()) {
+      toast.error('Please enter a question', { description: 'Survey question is required' });
+      return;
+    }
+    try {
+      await sendQuickSurvey.mutateAsync({
+        question: newQuestion.trim(),
+        response_type: responseType,
+      });
+      toast.success('Survey sent', {
+        description: 'Email invitations are being sent to employees.',
+      });
+      setNewQuestion('');
+    } catch {
+      toast.error('Failed to send survey');
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackText.trim()) {
+      toast.error('Please enter feedback', { description: 'Feedback text is required' });
+      return;
+    }
+    try {
+      await submitFeedback.mutateAsync({
+        category: 'General',
+        message: feedbackText.trim(),
+        anonymous: true,
+        sentiment: feedbackSentiment,
+      });
+      toast.success('Feedback submitted', { description: 'Your anonymous feedback has been recorded' });
+      setFeedbackText('');
+      setFeedbackSentiment('neutral');
+    } catch {
+      toast.error('Failed to submit feedback');
+    }
+  };
+
+  const correlationLabel =
+    attritionCorrelation == null
+      ? 'Not enough data to compute correlation'
+      : attritionCorrelation <= -0.5
+        ? 'strong negative correlation'
+        : attritionCorrelation < 0
+          ? 'moderate negative correlation'
+          : attritionCorrelation === 0
+            ? 'no linear correlation'
+            : 'positive correlation';
+
   return (
     <div className="space-y-6">
-      {/* Create Survey Dialog */}
       <CreateSurveyDialog open={surveyDialogOpen} onOpenChange={setSurveyDialogOpen} />
 
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Employee Engagement</h1>
           <p className="text-muted-foreground">Monitor sentiment, collect feedback, and track engagement</p>
         </div>
         <div className="flex gap-2">
-          <Button 
+          <Button
             variant="outline"
-            onClick={() => toast.info('Sending pulse survey', { description: 'Quick 3-question survey to all employees' })}
+            disabled={sendPulseSurvey.isPending}
+            onClick={handleSendPulseSurvey}
           >
             <MessageCircle className="h-4 w-4 mr-2" />
-            Send Pulse Survey
+            {sendPulseSurvey.isPending ? 'Sending...' : 'Send Pulse Survey'}
           </Button>
           <Button onClick={() => setSurveyDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
@@ -145,7 +202,6 @@ export default function Engagement() {
         </div>
       </div>
 
-      {/* Overview Cards */}
       <div className="grid md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-5">
@@ -183,7 +239,7 @@ export default function Engagement() {
               </div>
               <div>
                 <p className="text-2xl font-bold">{recentFeedback.length}</p>
-                <p className="text-sm text-muted-foreground">New Feedback</p>
+                <p className="text-sm text-muted-foreground">Recent Feedback</p>
               </div>
             </div>
           </CardContent>
@@ -196,7 +252,7 @@ export default function Engagement() {
                 <Users className="h-5 w-5 text-chart-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{summary?.participationRate ?? 85}%</p>
+                <p className="text-2xl font-bold">{summary?.participationRate ?? 0}%</p>
                 <p className="text-sm text-muted-foreground">Survey Participation</p>
               </div>
             </div>
@@ -213,7 +269,6 @@ export default function Engagement() {
           <TabsTrigger value="correlation">Engagement vs Attrition</TabsTrigger>
         </TabsList>
 
-        {/* Sentiment Analysis Tab */}
         <TabsContent value="sentiment">
           <div className="grid lg:grid-cols-2 gap-6">
             <Card>
@@ -224,7 +279,7 @@ export default function Engagement() {
               <CardContent>
                 <div className="space-y-4">
                   {sentimentData.map((item) => (
-                    <div key={item.category} className="space-y-2">
+                    <div key={String(item.category)} className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span className="font-medium">{item.category}</span>
                         <span className="text-muted-foreground">
@@ -232,35 +287,12 @@ export default function Engagement() {
                         </span>
                       </div>
                       <div className="flex h-3 rounded-full overflow-hidden">
-                        <div
-                          className="bg-success"
-                          style={{ width: `${item.positive}%` }}
-                        />
-                        <div
-                          className="bg-muted"
-                          style={{ width: `${item.neutral}%` }}
-                        />
-                        <div
-                          className="bg-destructive"
-                          style={{ width: `${item.negative}%` }}
-                        />
+                        <div className="bg-success" style={{ width: `${item.positive}%` }} />
+                        <div className="bg-muted" style={{ width: `${item.neutral}%` }} />
+                        <div className="bg-destructive" style={{ width: `${item.negative}%` }} />
                       </div>
                     </div>
                   ))}
-                </div>
-                <div className="flex justify-center gap-6 mt-6">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-success" />
-                    <span className="text-sm">Positive</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-muted" />
-                    <span className="text-sm">Neutral</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-destructive" />
-                    <span className="text-sm">Negative</span>
-                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -293,7 +325,6 @@ export default function Engagement() {
           </div>
         </TabsContent>
 
-        {/* Engagement Trends Tab */}
         <TabsContent value="trends">
           <Card>
             <CardHeader>
@@ -337,24 +368,13 @@ export default function Engagement() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="flex justify-center gap-6 mt-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-0.5 bg-primary" />
-                  <span className="text-sm">Engagement Score (0-10)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-0.5 bg-success" style={{ borderStyle: 'dashed' }} />
-                  <span className="text-sm">Participation Rate (%)</span>
-                </div>
-              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Surveys Tab */}
         <TabsContent value="surveys">
           <div className="grid lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-6">
               <Card>
                 <CardHeader>
                   <CardTitle>Active Surveys</CardTitle>
@@ -362,10 +382,15 @@ export default function Engagement() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
+                    {surveys.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No surveys yet. Create one to get started.</p>
+                    )}
                     {surveys.map((survey) => (
                       <div
                         key={survey.id}
-                        className="p-4 rounded-lg border hover:bg-muted/30 transition-colors"
+                        className={`p-4 rounded-lg border transition-colors ${
+                          selectedSurveyId === survey.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'
+                        }`}
                       >
                         <div className="flex items-center justify-between mb-3">
                           <div>
@@ -383,18 +408,50 @@ export default function Engagement() {
                             {survey.status}
                           </Badge>
                         </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>Responses</span>
-                            <span>{survey.responses} / {survey.total}</span>
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                              <span>Responses</span>
+                              <span>{survey.responses} / {survey.total}</span>
+                            </div>
+                            <Progress
+                              value={survey.total > 0 ? (survey.responses / survey.total) * 100 : 0}
+                              className="h-2"
+                            />
                           </div>
-                          <Progress value={(survey.responses / survey.total) * 100} className="h-2" />
+                          <Button
+                            variant={selectedSurveyId === survey.id ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => {
+                              if (selectedSurveyId === survey.id) {
+                                setSelectedSurveyId(null);
+                                setSelectedSurveyTitle('');
+                              } else {
+                                setSelectedSurveyId(survey.id);
+                                setSelectedSurveyTitle(survey.name);
+                              }
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            {selectedSurveyId === survey.id ? 'Hide Responses' : 'View Responses'}
+                          </Button>
                         </div>
                       </div>
                     ))}
                   </div>
                 </CardContent>
               </Card>
+
+              {selectedSurveyId && (
+                <SurveyResponsesPanel
+                  surveyId={selectedSurveyId}
+                  surveyTitle={selectedSurveyTitle}
+                  onClose={() => {
+                    setSelectedSurveyId(null);
+                    setSelectedSurveyTitle('');
+                  }}
+                />
+              )}
             </div>
 
             <Card>
@@ -415,7 +472,7 @@ export default function Engagement() {
 
                 <div>
                   <Label>Response Type</Label>
-                  <RadioGroup defaultValue="scale" className="mt-2">
+                  <RadioGroup value={responseType} onValueChange={setResponseType} className="mt-2">
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="scale" id="scale" />
                       <Label htmlFor="scale" className="font-normal">1-10 Scale</Label>
@@ -431,26 +488,19 @@ export default function Engagement() {
                   </RadioGroup>
                 </div>
 
-                <Button 
+                <Button
                   className="w-full"
-                  onClick={() => {
-                    if (newQuestion) {
-                      toast.success('Survey sent', { description: `Delivered to ${kpis?.totalEmployees ?? 0} employees` });
-                      setNewQuestion('');
-                    } else {
-                      toast.error('Please enter a question', { description: 'Survey question is required' });
-                    }
-                  }}
+                  disabled={sendQuickSurvey.isPending}
+                  onClick={handleSendQuickSurvey}
                 >
                   <Send className="h-4 w-4 mr-2" />
-                  Send to All Employees
+                  {sendQuickSurvey.isPending ? 'Sending...' : 'Send to All Employees'}
                 </Button>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        {/* Anonymous Feedback Tab */}
         <TabsContent value="feedback">
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -461,6 +511,9 @@ export default function Engagement() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
+                    {recentFeedback.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No feedback submitted yet.</p>
+                    )}
                     {recentFeedback.map((feedback) => (
                       <div
                         key={feedback.id}
@@ -505,13 +558,28 @@ export default function Engagement() {
                 <div>
                   <Label>How are you feeling?</Label>
                   <div className="flex gap-4 mt-2">
-                    <Button variant="outline" className="flex-1">
+                    <Button
+                      type="button"
+                      variant={feedbackSentiment === 'positive' ? 'default' : 'outline'}
+                      className="flex-1"
+                      onClick={() => setFeedbackSentiment('positive')}
+                    >
                       <Smile className="h-5 w-5 text-success" />
                     </Button>
-                    <Button variant="outline" className="flex-1">
+                    <Button
+                      type="button"
+                      variant={feedbackSentiment === 'neutral' ? 'default' : 'outline'}
+                      className="flex-1"
+                      onClick={() => setFeedbackSentiment('neutral')}
+                    >
                       <Meh className="h-5 w-5 text-warning" />
                     </Button>
-                    <Button variant="outline" className="flex-1">
+                    <Button
+                      type="button"
+                      variant={feedbackSentiment === 'negative' ? 'default' : 'outline'}
+                      className="flex-1"
+                      onClick={() => setFeedbackSentiment('negative')}
+                    >
                       <Frown className="h-5 w-5 text-destructive" />
                     </Button>
                   </div>
@@ -527,26 +595,19 @@ export default function Engagement() {
                   />
                 </div>
 
-                <Button 
+                <Button
                   className="w-full"
-                  onClick={() => {
-                    if (feedbackText) {
-                      toast.success('Feedback submitted', { description: 'Your anonymous feedback has been recorded' });
-                      setFeedbackText('');
-                    } else {
-                      toast.error('Please enter feedback', { description: 'Feedback text is required' });
-                    }
-                  }}
+                  disabled={submitFeedback.isPending}
+                  onClick={handleSubmitFeedback}
                 >
                   <Send className="h-4 w-4 mr-2" />
-                  Submit Anonymously
+                  {submitFeedback.isPending ? 'Submitting...' : 'Submit Anonymously'}
                 </Button>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        {/* Correlation Tab */}
         <TabsContent value="correlation">
           <Card>
             <CardHeader>
@@ -603,9 +664,15 @@ export default function Engagement() {
               </div>
               <div className="mt-4 p-4 rounded-lg bg-muted/50 border">
                 <p className="text-sm text-muted-foreground">
-                  <strong>Correlation coefficient: r = -0.72</strong> — There is a strong negative correlation
-                  between engagement scores and attrition risk. Employees with higher engagement are significantly
-                  less likely to leave.
+                  {attritionCorrelation == null ? (
+                    <>Not enough employee data to compute a Pearson correlation yet.</>
+                  ) : (
+                    <>
+                      <strong>Correlation coefficient: r = {attritionCorrelation}</strong> — There is a {correlationLabel}
+                      {' '}between satisfaction scores and attrition risk.
+                      {attritionCorrelation < 0 && ' Employees with higher engagement tend to have lower attrition risk.'}
+                    </>
+                  )}
                 </p>
               </div>
             </CardContent>

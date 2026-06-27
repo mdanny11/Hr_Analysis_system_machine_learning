@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, Mail, Shield, CheckCircle, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
+import { api } from '@/services/api';
 import isonLogo from '@/assets/ison-logo.png';
 import isonBanner from '@/assets/ison-banner.jpg';
 
@@ -21,30 +21,80 @@ export default function AccountRecovery() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSendCode = async () => {
-    if (!email) { toast.error('Please enter your email'); return; }
+    if (!email) {
+      toast.error('Please enter your email');
+      return;
+    }
     setIsLoading(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setIsLoading(false);
-    toast.success('Verification code sent', { description: `Check ${email} for the 6-digit code` });
-    setStep('verify');
+    try {
+      const result = await api.auth.forgotPassword(email);
+      if (result.devCode) {
+        toast.info('Development mode', { description: `Verification code: ${result.devCode}` });
+      }
+      toast.success('Verification code sent', { description: `Check ${email} for the 6-digit code` });
+      setStep('verify');
+    } catch {
+      toast.error('Failed to send verification code');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleVerifyCode = async () => {
-    if (verificationCode.length !== 6) { toast.error('Please enter the 6-digit code'); return; }
+    if (verificationCode.length !== 6) {
+      toast.error('Please enter the 6-digit code');
+      return;
+    }
     setIsLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    setIsLoading(false);
-    toast.success('Identity verified');
-    setStep('reset');
+    try {
+      const result = await api.auth.verifyCode(email, verificationCode);
+      if (!result.valid) {
+        toast.error('Invalid or expired verification code');
+        return;
+      }
+      toast.success('Identity verified');
+      setStep('reset');
+    } catch {
+      toast.error('Failed to verify code');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleResetPassword = async () => {
-    if (newPassword.length < 8) { toast.error('Password must be at least 8 characters'); return; }
-    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return; }
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
     setIsLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    setIsLoading(false);
-    setStep('success');
+    try {
+      await api.auth.resetPassword(email, verificationCode, newPassword);
+      setStep('success');
+      toast.success('Password reset successfully');
+    } catch {
+      toast.error('Failed to reset password');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setIsLoading(true);
+    try {
+      const result = await api.auth.forgotPassword(email);
+      if (result.devCode) {
+        toast.info('Development mode', { description: `New code: ${result.devCode}` });
+      }
+      toast.success('New verification code sent');
+    } catch {
+      toast.error('Failed to resend code');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -98,7 +148,7 @@ export default function AccountRecovery() {
               <Button onClick={handleVerifyCode} disabled={isLoading} className="w-full h-12 rounded-xl">
                 {isLoading ? <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Verify Code'}
               </Button>
-              <button onClick={() => { toast.info('New code sent'); }} className="w-full text-sm text-white/60 hover:text-white transition-colors">Resend code</button>
+              <button onClick={handleResendCode} disabled={isLoading} className="w-full text-sm text-white/60 hover:text-white transition-colors">Resend code</button>
             </div>
           )}
 
@@ -111,7 +161,7 @@ export default function AccountRecovery() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label className="text-white/90">New Password</Label>
-                  <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 8 characters" className="h-12 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
+                  <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 6 characters" className="h-12 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-white/90">Confirm Password</Label>

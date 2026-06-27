@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import get_settings
 from app.core.responses import Meta, success_response
 from app.database import get_db
 from app.dependencies import get_client_ip, get_current_user, require_admin
@@ -8,8 +10,10 @@ from app.models.user import User
 from app.schemas.auth import (
     AccessRequestCreate,
     AdminResetPasswordRequest,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    ProfileUpdateRequest,
     RefreshRequest,
     ResetPasswordRequest,
     UserCreate,
@@ -21,15 +25,19 @@ from app.services.audit_service import log_audit
 from app.services.auth_service import (
     admin_reset_user_password,
     authenticate_user,
+    change_user_password,
     create_access_request,
     create_user_record,
     initiate_password_reset,
     issue_tokens,
+    refresh_access_token,
     reset_password,
     revoke_refresh_token,
     serialize_user,
+    update_user_profile,
     verify_reset_code,
 )
+from app.services.user_export_service import export_users_csv
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -67,15 +75,42 @@ def me(user: User = Depends(get_current_user)):
     return success_response(serialize_user(user))
 
 
+@router.patch("/me")
+def update_me(
+    payload: ProfileUpdateRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    updated = update_user_profile(db, user, payload.model_dump(exclude_unset=True), get_client_ip(request))
+    return success_response(serialize_user(updated))
+
+
+@router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    change_user_password(db, user, payload.current_password, payload.new_password, get_client_ip(request))
+    return success_response({"message": "Password changed successfully"})
+
+
+@router.post("/refresh")
+def refresh_tokens(payload: RefreshRequest, request: Request, db: Session = Depends(get_db)):
+    data = refresh_access_token(db, payload.refresh_token, get_client_ip(request))
+    return success_response(data)
+
+
 @router.post("/forgot-password")
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     code = initiate_password_reset(db, payload.email)
-    return success_response(
-        {
-            "message": "Verification code sent",
-            "devCode": code,
-        }
-    )
+    settings = get_settings()
+    response: dict = {"message": "Verification code sent"}
+    if settings.debug:
+        response["devCode"] = code
+    return success_response(response)
 
 
 @router.post("/verify-code")
@@ -112,6 +147,19 @@ def list_users(
 ):
     users = db.query(User).options(joinedload(User.department)).filter(User.deleted_at.is_(None)).all()
     return success_response([serialize_user(u) for u in users])
+
+
+@users_router.get("/export")
+def export_users(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    csv_content = export_users_csv(db)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="users_export.csv"'},
+    )
 
 
 @users_router.post("")

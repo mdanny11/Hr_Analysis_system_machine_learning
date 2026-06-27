@@ -23,6 +23,14 @@ class Settings(BaseSettings):
 
     seed_on_startup: bool = False
 
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    frontend_url: str = "http://localhost:8080"
+    survey_email_max_per_launch: int = 100
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

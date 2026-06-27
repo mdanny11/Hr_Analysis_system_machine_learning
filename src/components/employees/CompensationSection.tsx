@@ -1,30 +1,42 @@
 import { DollarSign, TrendingUp, Gift, Wallet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import type { Employee } from '@/lib/types';
 
 interface Props {
-  salary: number;
-  department: string;
-  yearsAtCompany: number;
+  employee: Employee;
 }
 
-export function CompensationSection({ salary, department, yearsAtCompany }: Props) {
+import { DEFAULT_CURRENCY, formatCurrency } from '@/lib/currency';
+
+function formatMoney(amount: number, currency = DEFAULT_CURRENCY): string {
+  return formatCurrency(amount, currency);
+}
+
+export function CompensationSection({ employee }: Props) {
+  const { salary, currency = 'RWF', department, yearsAtCompany } = employee;
   const bonus = Math.round(salary * 0.12);
   const stockOptions = yearsAtCompany >= 3 ? Math.round(salary * 0.08) : 0;
   const totalComp = salary + bonus + stockOptions;
-  const marketMedian = Math.round(salary * (0.9 + Math.random() * 0.2));
-  const compaRatio = Math.round((salary / marketMedian) * 100);
+  const marketMedian = Math.round(salary * 0.95);
+  const compaRatio = marketMedian > 0 ? Math.round((salary / marketMedian) * 100) : 100;
 
   const items = [
-    { icon: DollarSign, label: 'Base Salary', value: `$${salary.toLocaleString()}`, sub: 'Annual', color: 'text-emerald-400' },
-    { icon: TrendingUp, label: 'Performance Bonus', value: `$${bonus.toLocaleString()}`, sub: '12% target', color: 'text-primary' },
-    { icon: Gift, label: 'Stock Options', value: stockOptions ? `$${stockOptions.toLocaleString()}` : 'Not eligible', sub: stockOptions ? '8% vesting' : 'Requires 3+ years', color: stockOptions ? 'text-purple-400' : 'text-white/30' },
-    { icon: Wallet, label: 'Total Compensation', value: `$${totalComp.toLocaleString()}`, sub: 'All-in annual', color: 'text-amber-400' },
+    { icon: DollarSign, label: 'Base Salary', value: formatMoney(salary, currency), sub: 'Annual', color: 'text-emerald-400' },
+    { icon: TrendingUp, label: 'Performance Bonus', value: formatMoney(bonus, currency), sub: '12% target', color: 'text-primary' },
+    {
+      icon: Gift,
+      label: 'Stock Options',
+      value: stockOptions ? formatMoney(stockOptions, currency) : 'Not eligible',
+      sub: stockOptions ? '8% vesting' : 'Requires 3+ years',
+      color: stockOptions ? 'text-purple-400' : 'text-white/30',
+    },
+    { icon: Wallet, label: 'Total Compensation', value: formatMoney(totalComp, currency), sub: 'All-in annual', color: 'text-amber-400' },
   ];
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        {items.map(item => (
+        {items.map((item) => (
           <div key={item.label} className="p-3 rounded-lg bg-white/5 border border-white/10">
             <div className="flex items-center gap-2 mb-1">
               <item.icon className={`h-4 w-4 ${item.color}`} />
@@ -44,9 +56,14 @@ export function CompensationSection({ salary, department, yearsAtCompany }: Prop
           </Badge>
         </div>
         <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${compaRatio >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(compaRatio, 130)}%`, maxWidth: '100%' }} />
+          <div
+            className={`h-full rounded-full transition-all ${compaRatio >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+            style={{ width: `${Math.min(compaRatio, 130)}%`, maxWidth: '100%' }}
+          />
         </div>
-        <p className="text-[10px] text-white/40 mt-1">Market median for {department}: ${marketMedian.toLocaleString()}</p>
+        <p className="text-[10px] text-white/40 mt-1">
+          Market median for {department}: {formatMoney(marketMedian, currency)}
+        </p>
       </div>
     </div>
   );

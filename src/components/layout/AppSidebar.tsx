@@ -53,28 +53,28 @@ const roleNavGroups: Record<UserRole, NavGroup[]> = {
       label: 'Management', items: [
         { title: 'User Management', href: '/user-management', icon: UserCog, permission: 'users.manage' },
         { title: 'Employee Data', href: '/employees', icon: Users, permission: 'employees.view' },
-        { title: 'Decisions', href: '/decisions', icon: Target, permission: 'decisions.view' },
+        { title: 'Data Processing', href: '/data-processing', icon: Database, permission: 'data.preprocess' },
       ]
     },
     {
       label: 'Analytics & Risk', items: [
         { title: 'Predictions', href: '/predictions', icon: Brain, permission: 'predictions.view' },
         { title: 'Risk Analysis', href: '/risk-analysis', icon: BarChart3, permission: 'risk.view' },
-        { title: 'Benchmarking', href: '/benchmarks', icon: Scale, permission: 'benchmarks.view' },
-        { title: 'Model Performance', href: '/model-performance', icon: Activity, permission: 'models.view' },
+        { title: 'Decisions', href: '/decisions', icon: Target, permission: 'decisions.view' },
+        { title: 'Engagement', href: '/engagement', icon: MessageSquare, permission: 'engagement.view' },
+        { title: 'Alerts', href: '/alerts', icon: Bell, permission: 'alerts.view' },
       ]
     },
     {
       label: 'Security & Compliance', items: [
-        { title: 'Audit Logs', href: '/audit', icon: Shield, permission: 'audit.view' },
-        { title: 'Alerts', href: '/alerts', icon: Bell, permission: 'alerts.view' },
+        { title: 'Benchmarking', href: '/benchmarks', icon: Scale, permission: 'benchmarks.view' },
         { title: 'Reports', href: '/reports', icon: FileText, permission: 'reports.view' },
+        { title: 'Model Performance', href: '/model-performance', icon: Activity, permission: 'models.view' },
+        { title: 'Audit Logs', href: '/audit', icon: Shield, permission: 'audit.view' },
       ]
     },
     {
       label: 'System', items: [
-        { title: 'Data Processing', href: '/data-processing', icon: Database, permission: 'data.preprocess' },
-        { title: 'Engagement', href: '/engagement', icon: MessageSquare, permission: 'engagement.view' },
         { title: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' },
       ]
     },
@@ -87,21 +87,21 @@ const roleNavGroups: Record<UserRole, NavGroup[]> = {
     },
     {
       label: 'Analytics', items: [
+        { title: 'Employees', href: '/employees', icon: Users, permission: 'employees.view' },
         { title: 'Predictions', href: '/predictions', icon: Brain, permission: 'predictions.view' },
         { title: 'Risk Insights', href: '/risk-analysis', icon: BarChart3, permission: 'risk.view' },
-        { title: 'Benchmarking', href: '/benchmarks', icon: Scale, permission: 'benchmarks.view' },
       ]
     },
     {
       label: 'Actions', items: [
         { title: 'Interventions', href: '/decisions', icon: Target, permission: 'decisions.view' },
         { title: 'Engagement', href: '/engagement', icon: MessageSquare, permission: 'engagement.view' },
+        { title: 'Benchmarking', href: '/benchmarks', icon: Scale, permission: 'benchmarks.view' },
       ]
     },
     {
       label: 'Reporting', items: [
         { title: 'Reports', href: '/reports', icon: FileText, permission: 'reports.view' },
-        { title: 'Employees', href: '/employees', icon: Users, permission: 'employees.view' },
       ]
     },
   ],
@@ -113,20 +113,20 @@ const roleNavGroups: Record<UserRole, NavGroup[]> = {
     },
     {
       label: 'Data Lab', items: [
-        { title: 'Preprocessing', href: '/data-processing', icon: Database, permission: 'data.preprocess' },
         { title: 'Employees', href: '/employees', icon: Users, permission: 'employees.view' },
+        { title: 'Preprocessing', href: '/data-processing', icon: Database, permission: 'data.preprocess' },
       ]
     },
     {
       label: 'ML Models', items: [
         { title: 'Model Training', href: '/predictions', icon: Brain, permission: 'predictions.view' },
-        { title: 'Evaluation', href: '/model-performance', icon: Activity, permission: 'models.view' },
+        { title: 'Risk Analysis', href: '/risk-analysis', icon: BarChart3, permission: 'risk.view' },
       ]
     },
     {
       label: 'Output', items: [
         { title: 'Exports', href: '/reports', icon: FileText, permission: 'reports.view' },
-        { title: 'Risk Analysis', href: '/risk-analysis', icon: BarChart3, permission: 'risk.view' },
+        { title: 'Evaluation', href: '/model-performance', icon: Activity, permission: 'models.view' },
       ]
     },
   ],
@@ -139,12 +139,12 @@ const roleNavGroups: Record<UserRole, NavGroup[]> = {
     {
       label: 'My Team', items: [
         { title: 'Team Members', href: '/employees', icon: Users, permission: 'employees.view' },
+        { title: 'Engagement', href: '/engagement', icon: MessageSquare, permission: 'engagement.view' },
         { title: 'Alerts', href: '/alerts', icon: Bell, permission: 'alerts.view' },
       ]
     },
     {
       label: 'Feedback', items: [
-        { title: 'Engagement', href: '/engagement', icon: MessageSquare, permission: 'engagement.view' },
         { title: 'Reports', href: '/reports', icon: FileText, permission: 'reports.view' },
       ]
     },

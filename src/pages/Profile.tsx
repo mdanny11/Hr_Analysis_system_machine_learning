@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/services/api';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -52,7 +53,7 @@ export default function Profile() {
   const [language, setLanguage] = useState('en');
   
   // Security State
-  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(user?.mfaEnabled ?? false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -67,19 +68,22 @@ export default function Profile() {
     return labels[role] || role;
   };
 
-  const handleSaveProfile = () => {
-    toast.success('Profile updated successfully (prototype)', {
-      description: 'Your changes have been saved'
-    });
+  const handleSaveProfile = async () => {
+    try {
+      await api.auth.updateProfile({ name });
+      toast.success('Profile updated successfully');
+    } catch {
+      toast.error('Failed to update profile');
+    }
   };
 
   const handleSavePreferences = () => {
-    toast.success('Preferences saved (prototype)', {
-      description: 'Your preferences have been updated'
+    toast.success('Preferences saved locally', {
+      description: 'Display and notification preferences are stored in this browser session',
     });
   };
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
       toast.error('Please fill in all password fields');
       return;
@@ -88,23 +92,32 @@ export default function Profile() {
       toast.error('New passwords do not match');
       return;
     }
-    if (newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters');
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
       return;
     }
-    toast.success('Password changed successfully (prototype)', {
-      description: 'Your password has been updated'
-    });
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+    try {
+      await api.auth.changePassword(currentPassword, newPassword);
+      toast.success('Password changed successfully');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch {
+      toast.error('Failed to change password', { description: 'Check your current password and try again' });
+    }
   };
 
-  const handleToggleMfa = () => {
-    setMfaEnabled(!mfaEnabled);
-    toast.success(`MFA ${!mfaEnabled ? 'enabled' : 'disabled'} (prototype)`, {
-      description: !mfaEnabled ? 'Two-factor authentication is now active' : 'MFA has been turned off'
-    });
+  const handleToggleMfa = async () => {
+    const next = !mfaEnabled;
+    try {
+      await api.auth.updateProfile({ mfaEnabled: next });
+      setMfaEnabled(next);
+      toast.success(`MFA ${next ? 'enabled' : 'disabled'}`, {
+        description: next ? 'Two-factor authentication is now active' : 'MFA has been turned off',
+      });
+    } catch {
+      toast.error('Failed to update MFA setting');
+    }
   };
 
   const handleLogout = () => {

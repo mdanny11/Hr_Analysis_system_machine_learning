@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 
@@ -196,7 +198,274 @@ def test_reject_access_request(client: TestClient, auth_headers):
     assert reject_response.json()["data"]["request"]["status"] == "rejected"
 
 
+def test_auth_refresh(client: TestClient):
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@ison.com", "password": "password123"},
+    )
+    refresh_token = login.json()["data"]["refreshToken"]
+    response = client.post("/api/v1/auth/refresh", json={"refreshToken": refresh_token})
+    assert response.status_code == 200
+    assert "accessToken" in response.json()["data"]
+
+
+def test_change_password(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.post(
+        "/api/v1/auth/change-password",
+        headers=headers,
+        json={"currentPassword": "password123", "newPassword": "newSecure1"},
+    )
+    assert response.status_code == 200
+    client.post(
+        "/api/v1/auth/change-password",
+        headers=headers,
+        json={"currentPassword": "newSecure1", "newPassword": "password123"},
+    )
+
+
 def test_access_requests_require_admin(client: TestClient, auth_headers):
     headers = auth_headers("manager@ison.com")
     response = client.get("/api/v1/access-requests", headers=headers)
     assert response.status_code == 403
+
+
+def test_export_employees_csv(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get("/api/v1/employees/export", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    body = response.text
+    assert "firstName,lastName,email" in body
+    assert body.count("\n") >= 501
+
+
+def test_export_employees_xlsx(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get("/api/v1/employees/export?format=xlsx", headers=headers)
+    assert response.status_code == 200
+    assert "spreadsheetml.sheet" in response.headers["content-type"]
+    assert response.content[:2] == b"PK"
+
+
+def test_import_employees_xlsx(client: TestClient, auth_headers):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    headers = auth_headers("admin@ison.com")
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(
+        [
+            "employeeId",
+            "firstName",
+            "lastName",
+            "email",
+            "department",
+            "position",
+            "hireDate",
+            "salary",
+            "currency",
+            "payFrequency",
+            "age",
+            "gender",
+            "yearsAtCompany",
+            "performanceScore",
+            "satisfactionScore",
+            "workLifeBalance",
+            "lastPromotionYears",
+            "trainingHours",
+            "overtimeHours",
+        ]
+    )
+    worksheet.append(
+        [
+            "EMP88888",
+            "Excel",
+            "Import",
+            "excel.import@example.com",
+            "Engineering",
+            "Analyst",
+            "2024-06-01",
+            450000,
+            "RWF",
+            "monthly",
+            29,
+            "female",
+            1,
+            7.0,
+            7.5,
+            7.0,
+            0,
+            8,
+            4,
+        ]
+    )
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+
+    response = client.post(
+        "/api/v1/employees/import",
+        headers=headers,
+        files={"file": ("employees.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["created"] == 1
+    assert data["skipped"] == 0
+
+
+def test_import_employees_csv(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    csv_content = (
+        "employeeId,firstName,lastName,email,department,position,hireDate,salary,currency,payFrequency,age,gender,"
+        "yearsAtCompany,performanceScore,satisfactionScore,workLifeBalance,lastPromotionYears,trainingHours,overtimeHours\n"
+        "EMP99999,Import,Test,import.test@example.com,Engineering,Analyst,2024-06-01,450000,RWF,monthly,29,female,"
+        "1,7.0,7.5,7.0,0,8,4\n"
+    )
+    response = client.post(
+        "/api/v1/employees/import",
+        headers=headers,
+        files={"file": ("employees.csv", csv_content, "text/csv")},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["created"] == 1
+    assert data["skipped"] == 0
+
+    duplicate = client.post(
+        "/api/v1/employees/import",
+        headers=headers,
+        files={"file": ("employees.csv", csv_content, "text/csv")},
+    )
+    assert duplicate.status_code == 200
+    dup_data = duplicate.json()["data"]
+    assert dup_data["created"] == 0
+    assert dup_data["skipped"] == 1
+
+
+def test_import_employees_requires_edit_permission(client: TestClient, auth_headers):
+    headers = auth_headers("analyst@ison.com")
+    response = client.post(
+        "/api/v1/employees/import",
+        headers=headers,
+        files={"file": ("employees.csv", "firstName,lastName,email\n", "text/csv")},
+    )
+    assert response.status_code == 403
+
+
+def test_import_years_at_company_from_hire_date(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    csv_content = (
+        "employeeId,firstName,lastName,email,department,position,hireDate,salary,currency,payFrequency,age,gender,"
+        "yearsAtCompany,performanceScore,satisfactionScore,workLifeBalance,lastPromotionYears,trainingHours,overtimeHours\n"
+        "EMP88888,Tenure,Check,tenure.check@example.com,Engineering,Analyst,2020-06-15,450000,RWF,monthly,32,female,"
+        "99,7.0,7.5,7.0,0,8,4\n"
+    )
+    response = client.post(
+        "/api/v1/employees/import",
+        headers=headers,
+        files={"file": ("employees.csv", csv_content, "text/csv")},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["created"] == 1
+
+    employees = client.get(
+        "/api/v1/employees?search=tenure.check@example.com&limit=1",
+        headers=headers,
+    ).json()["data"]
+    assert len(employees) == 1
+    expected_years = max(0, date.today().year - 2020 - (1 if (date.today().month, date.today().day) < (6, 15) else 0))
+    assert employees[0]["yearsAtCompany"] == expected_years
+    assert employees[0]["yearsAtCompany"] != 99
+
+
+def test_create_employee_duplicate_email(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    existing = client.get("/api/v1/employees?limit=1", headers=headers).json()["data"][0]["email"]
+    payload = {
+        "firstName": "Dup",
+        "lastName": "Test",
+        "email": existing,
+        "department": "Engineering",
+        "position": "Analyst",
+        "hireDate": "2024-01-01",
+        "salary": 100000,
+        "age": 30,
+        "gender": "male",
+    }
+    response = client.post("/api/v1/employees", headers=headers, json=payload)
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "DUPLICATE_EMAIL"
+
+
+def test_export_users_csv(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get("/api/v1/users/export", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    body = response.text
+    assert "name,email,role" in body
+    assert "admin@ison.com" in body
+
+
+def test_export_users_requires_admin(client: TestClient, auth_headers):
+    headers = auth_headers("manager@ison.com")
+    response = client.get("/api/v1/users/export", headers=headers)
+    assert response.status_code == 403
+
+
+def test_export_report_csv(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get(
+        "/api/v1/reports/export?templateId=1&format=csv&sections=Executive%20Summary,Risk%20Analysis",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    body = response.text
+    assert "HR Report Export" in body
+    assert "Executive Summary" in body
+
+
+def test_export_report_excel(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get(
+        "/api/v1/reports/export?templateId=1&format=excel&sections=Executive%20Summary",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert "spreadsheetml" in response.headers["content-type"]
+    assert response.content[:2] == b"PK"
+
+
+def test_export_report_pdf(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    response = client.get(
+        "/api/v1/reports/export?templateId=1&format=pdf&sections=Executive%20Summary",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+def test_notifications_list_and_mark_read(client: TestClient, auth_headers):
+    headers = auth_headers("admin@ison.com")
+    list_response = client.get("/api/v1/notifications", headers=headers)
+    assert list_response.status_code == 200
+    notifications = list_response.json()["data"]
+    assert len(notifications) >= 1
+    unread = next(n for n in notifications if not n["read"])
+
+    mark_response = client.patch(f"/api/v1/notifications/{unread['id']}/read", headers=headers)
+    assert mark_response.status_code == 200
+    assert mark_response.json()["data"]["read"] is True
+
+    mark_all_response = client.post("/api/v1/notifications/mark-all-read", headers=headers)
+    assert mark_all_response.status_code == 200
+
+    refreshed = client.get("/api/v1/notifications", headers=headers).json()["data"]
+    assert all(n["read"] for n in refreshed)

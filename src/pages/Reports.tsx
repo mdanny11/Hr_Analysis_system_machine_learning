@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { api } from '@/services/api';
+import { ApiError } from '@/lib/apiClient';
+import { formatCurrency, formatCurrencyCompact } from '@/lib/currency';
 import {
   useKpis,
   useReportTemplates,
@@ -7,8 +11,10 @@ import {
   useTurnoverCost,
   useReportCorrelations,
   useScheduledReports,
+  queryKeys,
 } from '@/hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -30,12 +36,13 @@ import {
   Clock,
   Plus,
   FileSpreadsheet,
-  Presentation,
   File,
   Send,
   Settings,
   Eye,
   Sparkles,
+  Info,
+  RefreshCw,
 } from 'lucide-react';
 import {
   LineChart,
@@ -60,18 +67,49 @@ const templateIcons: Record<string, typeof FileText> = {
   risk: PieChart,
 };
 
+const REPORT_SECTIONS = [
+  'Executive Summary',
+  'Risk Analysis',
+  'Department Breakdown',
+  'Recommendations',
+] as const;
+
+const CHART_PRIMARY = 'hsl(235, 60%, 55%)';
+const CHART_SUCCESS = 'hsl(142, 71%, 45%)';
+const CHART_WARNING = 'hsl(38, 92%, 50%)';
+
 export default function Reports() {
+  const queryClient = useQueryClient();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [exportFormat, setExportFormat] = useState('pdf');
+  const [startDate, setStartDate] = useState('2024-01-01');
+  const [endDate, setEndDate] = useState('2024-01-31');
+  const [selectedSections, setSelectedSections] = useState<string[]>([...REPORT_SECTIONS]);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
 
   const { data: kpiMetrics } = useKpis();
-  const { data: reportTemplates = [] } = useReportTemplates();
+  const { data: reportTemplates = [], isLoading } = useReportTemplates();
   const { data: forecastData = [] } = useReportForecast();
-  const { data: turnoverCostBreakdown = [] } = useTurnoverCost();
+  const { data: turnoverCostData } = useTurnoverCost();
   const { data: correlationData = [] } = useReportCorrelations();
   const { data: scheduledReportsRaw = [] } = useScheduledReports();
+
+  const refetchReports = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.reportTemplates });
+    queryClient.invalidateQueries({ queryKey: queryKeys.reportForecast });
+    queryClient.invalidateQueries({ queryKey: queryKeys.turnoverCost });
+    queryClient.invalidateQueries({ queryKey: queryKeys.reportCorrelations });
+    queryClient.invalidateQueries({ queryKey: queryKeys.scheduledReports });
+    queryClient.invalidateQueries({ queryKey: queryKeys.kpis });
+  };
+
+  const turnoverCostBreakdown = turnoverCostData?.breakdown ?? [];
+  const avgTurnoverCost = turnoverCostData?.avgTurnoverCost ?? 0;
+  const monthlyTurnover = turnoverCostData?.monthlyTurnover ?? kpiMetrics?.monthlyTurnover ?? 0;
+  const annualTurnoverCost = turnoverCostData?.annualImpact ?? avgTurnoverCost * monthlyTurnover * 12;
 
   const scheduledReports = useMemo(
     () =>
@@ -95,12 +133,53 @@ export default function Reports() {
     [reportTemplates],
   );
 
-  const monthlyTurnover = kpiMetrics?.monthlyTurnover ?? 0;
-  const avgTurnoverCost = turnoverCostBreakdown.reduce(
-    (sum, c) => sum + (Number(c.cost) || 0),
-    0,
-  );
-  const annualTurnoverCost = avgTurnoverCost * monthlyTurnover * 12;
+  const toggleSection = (section: string) => {
+    setSelectedSections((current) =>
+      current.includes(section) ? current.filter((s) => s !== section) : [...current, section],
+    );
+  };
+
+  const handlePreview = async () => {
+    if (!selectedTemplate) return;
+    const template = templatesWithIcons.find((t) => t.id === selectedTemplate);
+    setIsPreviewing(true);
+    try {
+      const preview = await api.reports.preview({});
+      toast.success(`Preview for ${template?.name}`, {
+        description: `Attrition rate: ${preview.kpis.attritionRate}% • ${preview.departments.length} departments`,
+      });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Preview failed';
+      toast.error('Preview failed', { description: message });
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!selectedTemplate) return;
+    const template = templatesWithIcons.find((t) => t.id === selectedTemplate);
+    setIsExporting(true);
+    try {
+      await api.reports.export({
+        templateId: selectedTemplate,
+        reportName: template?.name,
+        startDate,
+        endDate,
+        sections: selectedSections.join(','),
+        format: exportFormat,
+      });
+      const formatLabel = exportFormat === 'excel' ? 'Excel (.xlsx)' : 'PDF';
+      toast.success('Report exported', {
+        description: `${template?.name} downloaded as ${formatLabel}`,
+      });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Export failed';
+      toast.error('Export failed', { description: message });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -115,6 +194,10 @@ export default function Reports() {
           <p className="text-muted-foreground">Generate reports, analyze trends, and export insights</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={refetchReports} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
           <Button 
             variant="outline"
             onClick={() => setScheduleDrawerOpen(true)}
@@ -128,6 +211,17 @@ export default function Reports() {
           </Button>
         </div>
       </div>
+
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>How this works</AlertTitle>
+        <AlertDescription>
+          <strong>Preview &amp; Export</strong> pull live KPIs, risk, and department data from your 1,500+ employees.
+          Turnover cost and correlations are computed from current salaries and ML risk scores.
+          Forecast uses historical trends plus projected attrition ({kpiMetrics?.attritionRate ?? '—'}% today).
+          Export downloads a real PDF or Excel (.xlsx) file with your selected sections.
+        </AlertDescription>
+      </Alert>
 
       {/* Quick Stats */}
       <div className="grid md:grid-cols-4 gap-4">
@@ -166,7 +260,7 @@ export default function Reports() {
                 <DollarSign className="h-5 w-5 text-warning" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${(avgTurnoverCost / 1000).toFixed(1)}k</p>
+                <p className="text-2xl font-bold">{formatCurrencyCompact(avgTurnoverCost)}</p>
                 <p className="text-sm text-muted-foreground">Avg Turnover Cost</p>
               </div>
             </div>
@@ -180,7 +274,7 @@ export default function Reports() {
                 <TrendingUp className="h-5 w-5 text-destructive" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${(annualTurnoverCost / 1000000).toFixed(1)}M</p>
+                <p className="text-2xl font-bold">{formatCurrencyCompact(annualTurnoverCost)}</p>
                 <p className="text-sm text-muted-foreground">Annual Impact</p>
               </div>
             </div>
@@ -261,13 +355,7 @@ export default function Reports() {
                       <SelectItem value="excel">
                         <div className="flex items-center gap-2">
                           <FileSpreadsheet className="h-4 w-4" />
-                          Excel Spreadsheet
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="ppt">
-                        <div className="flex items-center gap-2">
-                          <Presentation className="h-4 w-4" />
-                          PowerPoint
+                          Excel Spreadsheet (.xlsx)
                         </div>
                       </SelectItem>
                     </SelectContent>
@@ -277,17 +365,21 @@ export default function Reports() {
                 <div className="space-y-2">
                   <Label>Date Range</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <Input type="date" defaultValue="2024-01-01" />
-                    <Input type="date" defaultValue="2024-01-31" />
+                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label>Include Sections</Label>
                   <div className="space-y-2">
-                    {['Executive Summary', 'Risk Analysis', 'Department Breakdown', 'Recommendations'].map((section) => (
+                    {REPORT_SECTIONS.map((section) => (
                       <div key={section} className="flex items-center gap-2">
-                        <Checkbox defaultChecked id={section} />
+                        <Checkbox
+                          checked={selectedSections.includes(section)}
+                          onCheckedChange={() => toggleSection(section)}
+                          id={section}
+                        />
                         <label htmlFor={section} className="text-sm">{section}</label>
                       </div>
                     ))}
@@ -295,28 +387,22 @@ export default function Reports() {
                 </div>
 
                 <div className="flex gap-2 pt-4">
-                  <Button 
-                    className="flex-1" 
-                    disabled={!selectedTemplate}
-                    onClick={() => {
-                      const template = templatesWithIcons.find(t => t.id === selectedTemplate);
-                      toast.info(`Generating preview for ${template?.name}`, { description: `Format: ${exportFormat.toUpperCase()}` });
-                    }}
+                  <Button
+                    className="flex-1"
+                    disabled={!selectedTemplate || isPreviewing}
+                    onClick={handlePreview}
                   >
                     <Eye className="h-4 w-4 mr-2" />
-                    Preview
+                    {isPreviewing ? 'Previewing...' : 'Preview'}
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    className="flex-1" 
-                    disabled={!selectedTemplate}
-                    onClick={() => {
-                      const template = templatesWithIcons.find(t => t.id === selectedTemplate);
-                      toast.success(`Exporting ${template?.name}`, { description: `Downloading as ${exportFormat.toUpperCase()}...` });
-                    }}
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    disabled={!selectedTemplate || isExporting}
+                    onClick={handleExport}
                   >
                     <Download className="h-4 w-4 mr-2" />
-                    Export
+                    {isExporting ? 'Exporting...' : 'Export'}
                   </Button>
                 </div>
               </CardContent>
@@ -407,7 +493,7 @@ export default function Reports() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={turnoverCostBreakdown} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis type="number" tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                      <XAxis type="number" tickFormatter={(v) => formatCurrencyCompact(v)} />
                       <YAxis dataKey="category" type="category" width={120} />
                       <Tooltip
                         contentStyle={{
@@ -415,9 +501,9 @@ export default function Reports() {
                           border: '1px solid hsl(var(--border))',
                           borderRadius: '8px',
                         }}
-                        formatter={(value: number) => [`$${value.toLocaleString()}`, 'Cost']}
+                        formatter={(value: number) => [formatCurrency(value), 'Cost']}
                       />
-                      <Bar dataKey="cost" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="cost" fill={CHART_PRIMARY} radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -438,7 +524,7 @@ export default function Reports() {
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Avg Cost per Turnover</p>
-                      <p className="text-2xl font-bold">${avgTurnoverCost.toLocaleString()}</p>
+                      <p className="text-2xl font-bold">{formatCurrency(avgTurnoverCost)}</p>
                     </div>
                   </div>
                 </div>
@@ -447,19 +533,19 @@ export default function Reports() {
                   <div className="flex justify-between p-3 rounded-lg border">
                     <span>Monthly Impact</span>
                     <span className="font-bold text-destructive">
-                      ${(avgTurnoverCost * monthlyTurnover).toLocaleString()}
+                      {formatCurrency(avgTurnoverCost * monthlyTurnover)}
                     </span>
                   </div>
                   <div className="flex justify-between p-3 rounded-lg border">
                     <span>Quarterly Impact</span>
                     <span className="font-bold text-destructive">
-                      ${(avgTurnoverCost * monthlyTurnover * 3).toLocaleString()}
+                      {formatCurrency(avgTurnoverCost * monthlyTurnover * 3)}
                     </span>
                   </div>
                   <div className="flex justify-between p-3 rounded-lg border bg-destructive/5">
                     <span className="font-medium">Annual Impact</span>
                     <span className="font-bold text-destructive">
-                      ${annualTurnoverCost.toLocaleString()}
+                      {formatCurrency(annualTurnoverCost)}
                     </span>
                   </div>
                 </div>
@@ -467,7 +553,7 @@ export default function Reports() {
                 <p className="text-sm text-muted-foreground">
                   Reducing attrition by just 10% could save approximately{' '}
                   <span className="font-medium text-success">
-                    ${(annualTurnoverCost * 0.1).toLocaleString()}
+                    {formatCurrency(annualTurnoverCost * 0.1)}
                   </span>{' '}
                   annually.
                 </p>

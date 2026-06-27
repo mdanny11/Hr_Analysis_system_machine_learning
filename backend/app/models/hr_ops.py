@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
@@ -75,12 +75,25 @@ class SurveyResponse(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class SurveyInvite(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "survey_invites"
+
+    survey_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("surveys.id"), nullable=False)
+    employee_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Feedback(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "feedback"
 
     category: Mapped[str] = mapped_column(String(128), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     anonymous: Mapped[bool] = mapped_column(Boolean, default=True)
+    sentiment: Mapped[str] = mapped_column(String(32), default="neutral", nullable=False)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -115,6 +128,8 @@ class ActionItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     priority: Mapped[str] = mapped_column(String(32), nullable=False)
 
+    assignee = relationship("User", foreign_keys=[assignee_id])
+
 
 class SuccessionCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "succession_candidates"
@@ -123,3 +138,5 @@ class SuccessionCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     target_role: Mapped[str] = mapped_column(String(255), nullable=False)
     readiness_score: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    employee = relationship("Employee", foreign_keys=[employee_id])

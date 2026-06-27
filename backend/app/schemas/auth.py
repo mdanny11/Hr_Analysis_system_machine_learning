@@ -55,6 +55,16 @@ class AdminResetPasswordRequest(CamelModel):
     password: str = Field(min_length=6)
 
 
+class ChangePasswordRequest(CamelModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+
+class ProfileUpdateRequest(CamelModel):
+    name: str | None = None
+    mfa_enabled: bool | None = None
+
+
 class AccessRequestCreate(CamelModel):
     name: str
     email: EmailStr

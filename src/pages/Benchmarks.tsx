@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
-import { useKpis, useBenchmarks, useBenchmarkCompetitors, useBenchmarkBestPractices } from '@/hooks/useApi';
+import { useQueryClient } from '@tanstack/react-query';
+import { useKpis, useBenchmarks, useBenchmarkCompetitors, useBenchmarkBestPractices, queryKeys } from '@/hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -26,6 +28,8 @@ import {
   XCircle,
   Lightbulb,
   ExternalLink,
+  Info,
+  RefreshCw,
 } from 'lucide-react';
 import {
   BarChart,
@@ -45,29 +49,11 @@ import {
   Line,
 } from 'recharts';
 
-const staticBenchmarkMetrics = [
-  { metric: 'Time to Fill', company: 42, industry: 48, top25: 32, unit: 'days' },
-  { metric: 'Training Hours/Year', company: 24, industry: 20, top25: 40, unit: 'hours' },
-  { metric: 'Internal Mobility', company: 18, industry: 15, top25: 28, unit: '%' },
-];
-
-const radarData = [
-  { metric: 'Retention', company: 85, industry: 78, topPerformer: 92 },
-  { metric: 'Satisfaction', company: 73, industry: 68, topPerformer: 85 },
-  { metric: 'Engagement', company: 70, industry: 65, topPerformer: 82 },
-  { metric: 'Development', company: 65, industry: 60, topPerformer: 80 },
-  { metric: 'Recognition', company: 68, industry: 62, topPerformer: 78 },
-  { metric: 'Work-Life', company: 72, industry: 70, topPerformer: 80 },
-];
-
-const gapAnalysis = [
-  { area: 'Training Investment', current: 24, benchmark: 40, gap: -40, priority: 'high' },
-  { area: 'Internal Mobility', current: 18, benchmark: 28, gap: -36, priority: 'high' },
-  { area: 'Employee Satisfaction', current: 73, benchmark: 82, gap: -11, priority: 'medium' },
-  { area: 'Retention Rate', current: 87.6, benchmark: 91.5, gap: -4, priority: 'medium' },
-  { area: 'Engagement Score', current: 70, benchmark: 82, gap: -15, priority: 'high' },
-  { area: 'Time to Fill', current: 42, benchmark: 32, gap: 31, priority: 'medium' },
-];
+const CHART_PRIMARY = 'hsl(235, 60%, 55%)';
+const CHART_SUCCESS = 'hsl(142, 71%, 45%)';
+const CHART_DANGER = 'hsl(4, 79%, 55%)';
+const CHART_WARNING = 'hsl(38, 92%, 50%)';
+const CHART_MUTED = 'hsl(220, 13%, 45%)';
 
 const trendData = [
   { year: '2020', company: 18.2, industry: 17.5 },
@@ -78,37 +64,53 @@ const trendData = [
 ];
 
 export default function Benchmarks() {
+  const queryClient = useQueryClient();
   const [selectedIndustry, setSelectedIndustry] = useState('technology');
 
   const { data: kpis } = useKpis();
-  const { data: benchmarkData } = useBenchmarks(selectedIndustry);
+  const { data: benchmarkData, isLoading } = useBenchmarks(selectedIndustry);
   const { data: competitorsRaw = [] } = useBenchmarkCompetitors();
   const { data: bestPracticesRaw = [] } = useBenchmarkBestPractices();
 
-  const industryBenchmarks = useMemo(() => {
-    const companyAttrition = Number(benchmarkData?.companyAttritionRate ?? kpis?.attritionRate ?? 12.4);
-    const industryAttrition = Number(benchmarkData?.attritionRate ?? 15.2);
-    const companyTenure = kpis?.avgTenure ?? 4.2;
-    const industryTenure = Number(benchmarkData?.avgTenure ?? 3.8);
-    const companySat = kpis?.avgSatisfaction ?? 7.3;
-    const industrySat = Number(benchmarkData?.avgSatisfaction ?? 6.8);
+  const refetchBenchmarks = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.benchmarks(selectedIndustry) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.benchmarkCompetitors });
+    queryClient.invalidateQueries({ queryKey: queryKeys.kpis });
+  };
 
+  type MetricRow = { metric: string; company: number; industry: number; top25: number; unit: string; higherIsBetter?: boolean };
+  type GapRow = { area: string; current: number; benchmark: number; gap: number; priority: string };
+
+  const industryBenchmarks = useMemo<MetricRow[]>(() => {
+    const apiMetrics = benchmarkData?.metrics as MetricRow[] | undefined;
+    if (apiMetrics?.length) return apiMetrics;
     return [
-      { metric: 'Attrition Rate', company: companyAttrition, industry: industryAttrition, top25: 8.5, unit: '%' },
-      { metric: 'Avg Tenure', company: companyTenure, industry: industryTenure, top25: 5.5, unit: 'years' },
-      { metric: 'Employee Satisfaction', company: companySat, industry: industrySat, top25: 8.2, unit: '/10' },
-      ...staticBenchmarkMetrics,
+      { metric: 'Attrition Rate', company: Number(benchmarkData?.companyAttritionRate ?? kpis?.attritionRate ?? 0), industry: Number(benchmarkData?.attritionRate ?? 0), top25: 8.5, unit: '%' },
+      { metric: 'Avg Tenure', company: kpis?.avgTenure ?? 0, industry: Number(benchmarkData?.avgTenure ?? 0), top25: 5.5, unit: ' years' },
+      { metric: 'Employee Satisfaction', company: kpis?.avgSatisfaction ?? 0, industry: Number(benchmarkData?.avgSatisfaction ?? 0), top25: 8.2, unit: '/10' },
     ];
   }, [benchmarkData, kpis]);
+
+  const radarData = useMemo(
+    () => (benchmarkData?.radar as Array<Record<string, string | number>> | undefined) ?? [],
+    [benchmarkData],
+  );
+
+  const gapAnalysis = useMemo<GapRow[]>(
+    () => (benchmarkData?.gaps as GapRow[] | undefined) ?? [],
+    [benchmarkData],
+  );
+
+  const summary = benchmarkData?.summary as Record<string, string | number> | undefined;
 
   const competitorComparison = useMemo(
     () =>
       competitorsRaw.map((c) => ({
         name: String(c.company),
         attrition: Number(c.attritionRate ?? 0),
-        satisfaction: 7.0,
-        tenure: 4.0,
-        training: Number(c.retentionPrograms ?? 0) * 5,
+        satisfaction: Number(c.satisfaction ?? 7.0),
+        tenure: Number(c.tenure ?? 4.0),
+        training: Number(c.training ?? c.retentionPrograms ?? 0) * (c.training ? 1 : 5),
       })),
     [competitorsRaw],
   );
@@ -126,10 +128,10 @@ export default function Benchmarks() {
     [bestPracticesRaw],
   );
 
-  const metricsAboveAvg = industryBenchmarks.filter((item) => {
+  const metricsAboveAvg = Number(summary?.metricsAboveAvg ?? industryBenchmarks.filter((item) => {
     const isHigherBetter = item.metric !== 'Attrition Rate' && item.metric !== 'Time to Fill';
     return isHigherBetter ? item.company > item.industry : item.company < item.industry;
-  }).length;
+  }).length);
 
   const getComparisonStatus = (company: number, industry: number, higherIsBetter: boolean = false) => {
     const diff = higherIsBetter ? company - industry : industry - company;
@@ -147,6 +149,10 @@ export default function Benchmarks() {
           <p className="text-muted-foreground">Compare performance against industry standards</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={refetchBenchmarks} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
           <Select value={selectedIndustry} onValueChange={setSelectedIndustry}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Select Industry" />
@@ -166,6 +172,16 @@ export default function Benchmarks() {
         </div>
       </div>
 
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>How this works</AlertTitle>
+        <AlertDescription>
+          <strong>Your Company</strong> metrics are computed live from your 1,500+ employee records and ML risk scores.
+          <strong> Industry / Top 25%</strong> values are reference benchmarks for the selected sector.
+          Trend Analysis uses illustrative historical data.
+        </AlertDescription>
+      </Alert>
+
       {/* Overview Cards */}
       <div className="grid md:grid-cols-4 gap-4">
         <Card>
@@ -175,7 +191,10 @@ export default function Benchmarks() {
                 <TrendingUp className="h-5 w-5 text-success" />
               </div>
               <div>
-                <p className="text-2xl font-bold">+2.8%</p>
+                <p className="text-2xl font-bold">
+                  {Number(summary?.aboveIndustryDelta ?? 0) >= 0 ? '+' : ''}
+                  {summary?.aboveIndustryDelta ?? '—'}%
+                </p>
                 <p className="text-sm text-muted-foreground">Above Industry Avg</p>
               </div>
             </div>
@@ -189,7 +208,9 @@ export default function Benchmarks() {
                 <Target className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{metricsAboveAvg}/{industryBenchmarks.length}</p>
+                <p className="text-2xl font-bold">
+                  {metricsAboveAvg}/{summary?.metricsTotal ?? industryBenchmarks.length}
+                </p>
                 <p className="text-sm text-muted-foreground">Metrics Above Avg</p>
               </div>
             </div>
@@ -203,7 +224,7 @@ export default function Benchmarks() {
                 <Scale className="h-5 w-5 text-warning" />
               </div>
               <div>
-                <p className="text-2xl font-bold">2</p>
+                <p className="text-2xl font-bold">{summary?.improvementAreas ?? '—'}</p>
                 <p className="text-sm text-muted-foreground">Improvement Areas</p>
               </div>
             </div>
@@ -217,7 +238,7 @@ export default function Benchmarks() {
                 <Award className="h-5 w-5 text-chart-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">Top 30%</p>
+                <p className="text-2xl font-bold">{summary?.industryRanking ?? '—'}</p>
                 <p className="text-sm text-muted-foreground">Industry Ranking</p>
               </div>
             </div>
@@ -245,7 +266,7 @@ export default function Benchmarks() {
               <CardContent>
                 <div className="space-y-4">
                   {industryBenchmarks.map((item) => {
-                    const isHigherBetter = item.metric !== 'Attrition Rate' && item.metric !== 'Time to Fill';
+                    const isHigherBetter = item.higherIsBetter ?? (item.metric !== 'Attrition Rate' && item.metric !== 'Time to Fill');
                     const status = getComparisonStatus(item.company, item.industry, isHigherBetter);
                     const StatusIcon = status.icon;
 
@@ -286,39 +307,21 @@ export default function Benchmarks() {
               </CardHeader>
               <CardContent>
                 <div className="h-[400px]">
+                {radarData.length === 0 && !isLoading ? (
+                  <p className="text-sm text-muted-foreground text-center py-16">Loading benchmark radar…</p>
+                ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <RadarChart data={radarData}>
-                      <PolarGrid stroke="hsl(var(--border))" />
-                      <PolarAngleAxis dataKey="metric" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                      <Radar
-                        name="Your Company"
-                        dataKey="company"
-                        stroke="hsl(var(--primary))"
-                        fill="hsl(var(--primary))"
-                        fillOpacity={0.3}
-                        strokeWidth={2}
-                      />
-                      <Radar
-                        name="Industry Avg"
-                        dataKey="industry"
-                        stroke="hsl(var(--muted-foreground))"
-                        fill="hsl(var(--muted-foreground))"
-                        fillOpacity={0.1}
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                      />
-                      <Radar
-                        name="Top Performer"
-                        dataKey="topPerformer"
-                        stroke="hsl(var(--success))"
-                        fill="hsl(var(--success))"
-                        fillOpacity={0.1}
-                        strokeWidth={2}
-                      />
+                      <PolarGrid stroke="hsl(220, 13%, 30%)" />
+                      <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                      <Radar name="Your Company" dataKey="company" stroke={CHART_PRIMARY} fill={CHART_PRIMARY} fillOpacity={0.3} strokeWidth={2} />
+                      <Radar name="Industry Avg" dataKey="industry" stroke={CHART_MUTED} fill={CHART_MUTED} fillOpacity={0.1} strokeWidth={2} strokeDasharray="5 5" />
+                      <Radar name="Top Performer" dataKey="topPerformer" stroke={CHART_SUCCESS} fill={CHART_SUCCESS} fillOpacity={0.1} strokeWidth={2} />
                       <Legend />
                     </RadarChart>
                   </ResponsiveContainer>
+                )}
                 </div>
               </CardContent>
             </Card>
@@ -347,25 +350,20 @@ export default function Benchmarks() {
                       }}
                     />
                     <Legend />
-                    <Bar dataKey="attrition" name="Attrition %" fill="hsl(var(--destructive))" />
-                    <Bar dataKey="satisfaction" name="Satisfaction" fill="hsl(var(--success))" />
-                    <Bar dataKey="tenure" name="Tenure (yrs)" fill="hsl(var(--primary))" />
-                    <Bar dataKey="training" name="Training (hrs)" fill="hsl(var(--warning))" />
+                    <Bar dataKey="attrition" name="Attrition %" fill={CHART_DANGER} />
+                    <Bar dataKey="satisfaction" name="Satisfaction" fill={CHART_SUCCESS} />
+                    <Bar dataKey="tenure" name="Tenure (yrs)" fill={CHART_PRIMARY} />
+                    <Bar dataKey="training" name="Training (hrs)" fill={CHART_WARNING} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
 
               <div className="mt-6 grid md:grid-cols-4 gap-4">
-                {[
-                  { label: 'Lowest Attrition', value: 'Competitor B', stat: '11.2%' },
-                  { label: 'Highest Satisfaction', value: 'Competitor B', stat: '7.8/10' },
-                  { label: 'Longest Tenure', value: 'Competitor B', stat: '4.8 yrs' },
-                  { label: 'Most Training', value: 'Competitor B', stat: '32 hrs' },
-                ].map((item, i) => (
+                {competitorComparison.slice(0, 4).map((item, i) => (
                   <div key={i} className="p-3 rounded-lg bg-muted/50 text-center">
-                    <p className="text-xs text-muted-foreground">{item.label}</p>
-                    <p className="font-semibold">{item.value}</p>
-                    <p className="text-sm text-primary">{item.stat}</p>
+                    <p className="text-xs text-muted-foreground">{item.name}</p>
+                    <p className="font-semibold">{item.attrition}% attrition</p>
+                    <p className="text-sm text-primary">{item.satisfaction}/10 sat · {item.tenure} yrs</p>
                   </div>
                 ))}
               </div>
@@ -427,7 +425,10 @@ export default function Benchmarks() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {gapAnalysis.map((item) => (
+                {gapAnalysis.length === 0 && !isLoading ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">No gap data yet.</p>
+                ) : (
+                gapAnalysis.map((item) => (
                   <div key={item.area} className="p-4 rounded-lg border">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
@@ -470,7 +471,8 @@ export default function Benchmarks() {
                       className="h-2"
                     />
                   </div>
-                ))}
+                ))
+                )}
               </div>
 
               <div className="mt-6 p-4 rounded-lg bg-muted/50 border">

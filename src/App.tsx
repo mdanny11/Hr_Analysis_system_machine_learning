@@ -24,6 +24,7 @@ import ModelPerformance from "./pages/ModelPerformance";
 import UserManagement from "./pages/UserManagement";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
+import SurveyRespond from "./pages/SurveyRespond";
 import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ function AppRoutes() {
       <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
       <Route path="/account-recovery" element={<AccountRecovery />} />
       <Route path="/access-request" element={<AccessRequest />} />
+      <Route path="/survey/:token" element={<SurveyRespond />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<RBACRoute permission="dashboard.view"><Dashboard /></RBACRoute>} />
@@ -80,7 +82,12 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <AppRoutes />
         </BrowserRouter>
       </TooltipProvider>

@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Employee } from '@/lib/types';
 import { useEmployees, useEmployeeStats, useDepartments, useInvalidateEmployees } from '@/hooks/useApi';
+import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/services/api';
+import { ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -24,11 +27,17 @@ import {
 const ITEMS_PER_PAGE = 10;
 
 export default function Employees() {
+  const { hasPermission } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const canImport = hasPermission('employees.edit');
 
   const { data: employeeData, isLoading } = useEmployees({
     search: searchQuery || undefined,
@@ -45,6 +54,80 @@ export default function Employees() {
   const total = employeeData?.meta?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / ITEMS_PER_PAGE));
 
+  const exportFilters = {
+    search: searchQuery || undefined,
+    department: departmentFilter !== 'all' ? departmentFilter : undefined,
+    risk: riskFilter !== 'all' ? riskFilter : undefined,
+  };
+
+  const handleExport = async (format: 'csv' | 'xlsx' = 'csv') => {
+    setIsExporting(true);
+    try {
+      await api.employees.export({ ...exportFilters, format });
+      toast.success('Employee data exported', {
+        description: format === 'xlsx' ? 'employees_export.xlsx downloaded' : 'employees_export.csv downloaded',
+      });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Export failed';
+      toast.error('Export failed', { description: message });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!file.name.toLowerCase().match(/\.(csv|xlsx)$/)) {
+      toast.error('Invalid file', { description: 'Please upload a CSV or Excel (.xlsx) file' });
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const result = await api.employees.import(file);
+      invalidateEmployees();
+      if (result.created > 0) {
+        toast.success('Import complete', {
+          description: `${result.created} employee(s) added${result.skipped ? `, ${result.skipped} skipped` : ''}`,
+        });
+      } else {
+        toast.warning('No employees imported', {
+          description: result.errors.slice(0, 2).map((e) => `Row ${e.row}: ${e.message}`).join(' · ') || 'All rows were skipped',
+        });
+      }
+      if (result.errors.length > 0) {
+        toast.info(`${result.errors.length} row issue(s)`, {
+          description: result.errors.slice(0, 5).map((e) => `Row ${e.row}: ${e.message}`).join(' · '),
+          duration: 10000,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Import failed';
+      toast.error('Import failed', { description: message });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleDownloadTemplate = async (format: 'csv' | 'xlsx' = 'csv') => {
+    try {
+      await api.employees.importTemplate(format);
+      toast.success('Template downloaded', {
+        description: format === 'xlsx' ? 'employee_import_template.xlsx saved' : 'employee_import_template.csv saved',
+      });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Download failed';
+      toast.error('Download failed', { description: message });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -53,13 +136,50 @@ export default function Employees() {
           <p className="text-muted-foreground">Manage and monitor your workforce</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => toast.info('Import coming soon')}>
-            <Upload className="h-4 w-4 mr-2" />Import
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => toast.success('Export started')}>
-            <Download className="h-4 w-4 mr-2" />Export
-          </Button>
-          <AddEmployeeDialog onSuccess={invalidateEmployees} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          {canImport && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isImporting}
+              onClick={handleImportClick}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {isImporting ? 'Importing...' : 'Import CSV/Excel'}
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={isExporting}>
+                <Download className="h-4 w-4 mr-2" />
+                {isExporting ? 'Exporting...' : 'Export'}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export Excel (.xlsx)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {canImport && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-muted-foreground">
+                  Template
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleDownloadTemplate('csv')}>CSV template</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleDownloadTemplate('xlsx')}>Excel template</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {canImport && <AddEmployeeDialog onSuccess={invalidateEmployees} />}
         </div>
       </div>
 

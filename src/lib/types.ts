@@ -8,6 +8,8 @@ export interface Employee {
   position: string;
   hireDate: string;
   salary: number;
+  currency?: string;
+  payFrequency?: string;
   age: number;
   gender: string;
   yearsAtCompany: number;
@@ -41,6 +43,7 @@ export interface PredictionModel {
   recall: number;
   f1Score: number;
   auc: number;
+  productionScore: number;
   lastTrained: string;
   status: 'active' | 'training' | 'deprecated';
 }

@@ -19,6 +19,8 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { api } from '@/services/api';
+import { ApiError } from '@/lib/apiClient';
+import { useDepartments } from '@/hooks/useApi';
 import { toast } from '@/hooks/use-toast';
 
 interface AddEmployeeDialogProps {
@@ -40,6 +42,12 @@ interface NewEmployee {
   salary: string;
   currency: string;
   payFrequency: string;
+  satisfactionScore: string;
+  performanceScore: string;
+  workLifeBalance: string;
+  lastPromotionYears: string;
+  trainingHours: string;
+  overtimeHours: string;
 }
 
 const initialEmployee: NewEmployee = {
@@ -55,20 +63,15 @@ const initialEmployee: NewEmployee = {
   employmentType: '',
   startDate: undefined,
   salary: '',
-  currency: 'USD',
+  currency: 'RWF',
   payFrequency: 'monthly',
+  satisfactionScore: '7',
+  performanceScore: '7',
+  workLifeBalance: '7',
+  lastPromotionYears: '0',
+  trainingHours: '0',
+  overtimeHours: '0',
 };
-
-const departments = [
-  'Engineering',
-  'Human Resources',
-  'Marketing',
-  'Sales',
-  'Finance',
-  'Operations',
-  'Customer Support',
-  'Research & Development',
-];
 
 const positions = [
   'Junior Developer',
@@ -82,6 +85,10 @@ const positions = [
 ];
 
 export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
+  const { data: departmentList = [] } = useDepartments();
+  const departmentNames = departmentList.length > 0 ? departmentList.map((d) => d.name) : [
+    'Engineering', 'Human Resources', 'Marketing', 'Sales', 'Finance', 'Operations', 'Customer Support', 'Research & Development',
+  ];
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('personal');
   const [employee, setEmployee] = useState<NewEmployee>(initialEmployee);
@@ -116,6 +123,10 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
     setIsSubmitting(true);
 
     try {
+      const yearsAtCompany = employee.startDate
+        ? Math.max(0, new Date().getFullYear() - employee.startDate.getFullYear())
+        : 0;
+
       await api.employees.create({
         firstName: employee.firstName,
         lastName: employee.lastName,
@@ -123,10 +134,18 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
         department: employee.department,
         position: employee.position,
         hireDate: employee.startDate ? employee.startDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        salary: Number(employee.salary) || 75000,
+        salary: Number(employee.salary) || 0,
+        currency: employee.currency,
+        payFrequency: employee.payFrequency,
         age: employee.dateOfBirth ? new Date().getFullYear() - employee.dateOfBirth.getFullYear() : 30,
         gender: employee.gender || 'Not specified',
-        yearsAtCompany: 0,
+        yearsAtCompany,
+        satisfactionScore: Number(employee.satisfactionScore) || 7,
+        performanceScore: Number(employee.performanceScore) || 7,
+        workLifeBalance: Number(employee.workLifeBalance) || 7,
+        lastPromotionYears: Number(employee.lastPromotionYears) || 0,
+        trainingHours: Number(employee.trainingHours) || 0,
+        overtimeHours: Number(employee.overtimeHours) || 0,
       });
 
       toast({
@@ -138,10 +157,11 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
       setEmployee(initialEmployee);
       setActiveTab('personal');
       setOpen(false);
-    } catch {
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Failed to add employee. Please try again.';
       toast({
         title: 'Error',
-        description: 'Failed to add employee. Please try again.',
+        description: message,
         variant: 'destructive',
       });
     } finally {
@@ -202,10 +222,11 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
           <TabsContent value="personal" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">
+                <Label htmlFor="add-employee-firstName" className="text-white/80">
                   First Name <span className="text-destructive">*</span>
                 </Label>
                 <Input
+                  id="add-employee-firstName"
                   placeholder="John"
                   value={employee.firstName}
                   onChange={(e) => updateEmployee('firstName', e.target.value)}
@@ -213,10 +234,11 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">
+                <Label htmlFor="add-employee-lastName" className="text-white/80">
                   Last Name <span className="text-destructive">*</span>
                 </Label>
                 <Input
+                  id="add-employee-lastName"
                   placeholder="Doe"
                   value={employee.lastName}
                   onChange={(e) => updateEmployee('lastName', e.target.value)}
@@ -226,10 +248,11 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-white/80">
+              <Label htmlFor="add-employee-email" className="text-white/80">
                 Email Address <span className="text-destructive">*</span>
               </Label>
               <Input
+                id="add-employee-email"
                 type="email"
                 placeholder="john.doe@company.com"
                 value={employee.email}
@@ -239,8 +262,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-white/80">Phone Number</Label>
+              <Label htmlFor="add-employee-phone" className="text-white/80">Phone Number</Label>
               <Input
+                id="add-employee-phone"
                 placeholder="+1 (555) 000-0000"
                 value={employee.phone}
                 onChange={(e) => updateEmployee('phone', e.target.value)}
@@ -250,10 +274,12 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">Date of Birth</Label>
+                <Label htmlFor="add-employee-dateOfBirth" className="text-white/80">Date of Birth</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
+                      id="add-employee-dateOfBirth"
+                      type="button"
                       variant="outline"
                       className={cn(
                         'w-full justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10',
@@ -277,9 +303,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                 </Popover>
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">Gender</Label>
+                <Label htmlFor="add-employee-gender" className="text-white/80">Gender</Label>
                 <Select value={employee.gender} onValueChange={(v) => updateEmployee('gender', v)}>
-                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectTrigger id="add-employee-gender" className="bg-white/5 border-white/10 text-white">
                     <SelectValue placeholder="Select gender" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-white/10">
@@ -297,15 +323,15 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
           <TabsContent value="job" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">
+                <Label htmlFor="add-employee-department" className="text-white/80">
                   Department <span className="text-destructive">*</span>
                 </Label>
                 <Select value={employee.department} onValueChange={(v) => updateEmployee('department', v)}>
-                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectTrigger id="add-employee-department" className="bg-white/5 border-white/10 text-white">
                     <SelectValue placeholder="Select department" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-white/10">
-                    {departments.map((dept) => (
+                    {departmentNames.map((dept) => (
                       <SelectItem key={dept} value={dept}>
                         {dept}
                       </SelectItem>
@@ -314,11 +340,11 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">
+                <Label htmlFor="add-employee-position" className="text-white/80">
                   Position <span className="text-destructive">*</span>
                 </Label>
                 <Select value={employee.position} onValueChange={(v) => updateEmployee('position', v)}>
-                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectTrigger id="add-employee-position" className="bg-white/5 border-white/10 text-white">
                     <SelectValue placeholder="Select position" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-white/10">
@@ -333,8 +359,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-white/80">Direct Manager</Label>
+              <Label htmlFor="add-employee-manager" className="text-white/80">Direct Manager</Label>
               <Input
+                id="add-employee-manager"
                 placeholder="Manager's name"
                 value={employee.manager}
                 onChange={(e) => updateEmployee('manager', e.target.value)}
@@ -344,9 +371,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">Employment Type</Label>
+                <Label htmlFor="add-employee-employmentType" className="text-white/80">Employment Type</Label>
                 <Select value={employee.employmentType} onValueChange={(v) => updateEmployee('employmentType', v)}>
-                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectTrigger id="add-employee-employmentType" className="bg-white/5 border-white/10 text-white">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-white/10">
@@ -358,10 +385,12 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">Start Date</Label>
+                <Label htmlFor="add-employee-startDate" className="text-white/80">Start Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
+                      id="add-employee-startDate"
+                      type="button"
                       variant="outline"
                       className={cn(
                         'w-full justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10',
@@ -390,8 +419,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
           <TabsContent value="compensation" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">Base Salary</Label>
+                <Label htmlFor="add-employee-salary" className="text-white/80">Base Salary</Label>
                 <Input
+                  id="add-employee-salary"
                   type="number"
                   placeholder="50000"
                   value={employee.salary}
@@ -400,12 +430,13 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">Currency</Label>
+                <Label htmlFor="add-employee-currency" className="text-white/80">Currency</Label>
                 <Select value={employee.currency} onValueChange={(v) => updateEmployee('currency', v)}>
-                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectTrigger id="add-employee-currency" className="bg-white/5 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-white/10">
+                    <SelectItem value="RWF">RWF (RWF)</SelectItem>
                     <SelectItem value="USD">USD ($)</SelectItem>
                     <SelectItem value="EUR">EUR (€)</SelectItem>
                     <SelectItem value="GBP">GBP (£)</SelectItem>
@@ -416,9 +447,9 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-white/80">Pay Frequency</Label>
+              <Label htmlFor="add-employee-payFrequency" className="text-white/80">Pay Frequency</Label>
               <Select value={employee.payFrequency} onValueChange={(v) => updateEmployee('payFrequency', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                <SelectTrigger id="add-employee-payFrequency" className="bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-900 border-white/10">
@@ -428,6 +459,33 @@ export function AddEmployeeDialog({ onSuccess }: AddEmployeeDialogProps) {
                   <SelectItem value="annually">Annually</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-satisfactionScore" className="text-white/80">Satisfaction Score (1-10)</Label>
+                <Input id="add-employee-satisfactionScore" type="number" min="1" max="10" step="0.1" value={employee.satisfactionScore} onChange={(e) => updateEmployee('satisfactionScore', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-performanceScore" className="text-white/80">Performance Score (1-10)</Label>
+                <Input id="add-employee-performanceScore" type="number" min="1" max="10" step="0.1" value={employee.performanceScore} onChange={(e) => updateEmployee('performanceScore', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-workLifeBalance" className="text-white/80">Work-Life Balance (1-10)</Label>
+                <Input id="add-employee-workLifeBalance" type="number" min="1" max="10" step="0.1" value={employee.workLifeBalance} onChange={(e) => updateEmployee('workLifeBalance', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-lastPromotionYears" className="text-white/80">Years Since Promotion</Label>
+                <Input id="add-employee-lastPromotionYears" type="number" min="0" value={employee.lastPromotionYears} onChange={(e) => updateEmployee('lastPromotionYears', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-trainingHours" className="text-white/80">Training Hours</Label>
+                <Input id="add-employee-trainingHours" type="number" min="0" value={employee.trainingHours} onChange={(e) => updateEmployee('trainingHours', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-employee-overtimeHours" className="text-white/80">Overtime Hours</Label>
+                <Input id="add-employee-overtimeHours" type="number" min="0" value={employee.overtimeHours} onChange={(e) => updateEmployee('overtimeHours', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+              </div>
             </div>
 
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">

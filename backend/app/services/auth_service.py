@@ -369,3 +369,84 @@ def create_user_record(
         db.commit()
         db.refresh(user)
     return user
+
+
+def refresh_access_token(db: Session, refresh_token: str, ip_address: str) -> dict:
+    from jose import JWTError
+
+    from app.core.security import parse_token_subject
+
+    try:
+        subject = parse_token_subject(refresh_token, expected_type="refresh")
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_TOKEN", "message": "Invalid or expired refresh token"},
+        )
+    token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+    record = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_TOKEN", "message": "Invalid or expired refresh token"},
+        )
+    user = db.query(User).filter(User.id == subject, User.deleted_at.is_(None)).first()
+    if not user or user.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCOUNT_INACTIVE", "message": "Account is not active"},
+        )
+    record.revoked_at = datetime.now(timezone.utc)
+    return issue_tokens(db, user, ip_address)
+
+
+def change_user_password(
+    db: Session,
+    user: User,
+    current_password: str,
+    new_password: str,
+    ip_address: str,
+) -> None:
+    if not verify_password(current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_PASSWORD", "message": "Current password is incorrect"},
+        )
+    user.password_hash = hash_password(new_password)
+    log_audit(
+        db,
+        user_id=user.id,
+        user_name=user.name,
+        action="CHANGE_PASSWORD",
+        resource="User",
+        details=f"User {user.email} changed password",
+        ip_address=ip_address,
+    )
+    db.commit()
+
+
+def update_user_profile(db: Session, user: User, data: dict, ip_address: str) -> User:
+    if "name" in data and data["name"] is not None:
+        user.name = data["name"]
+    if "mfa_enabled" in data and data["mfa_enabled"] is not None:
+        user.mfa_enabled = data["mfa_enabled"]
+    log_audit(
+        db,
+        user_id=user.id,
+        user_name=user.name,
+        action="UPDATE",
+        resource="Profile",
+        details=f"Updated profile for {user.email}",
+        ip_address=ip_address,
+    )
+    db.commit()
+    db.refresh(user)
+    return user

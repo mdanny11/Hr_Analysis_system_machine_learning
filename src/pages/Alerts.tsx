@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
-import { useAlerts, useAlertRules, queryKeys } from '@/hooks/useApi';
+import { useAlerts, useAlertRules, useAlertSummary, queryKeys } from '@/hooks/useApi';
 import type { Employee } from '@/lib/types';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -34,6 +35,7 @@ import {
   UserMinus,
   XCircle,
   RefreshCw,
+  Info,
 } from 'lucide-react';
 
 interface DisplayAlert {
@@ -90,8 +92,9 @@ export default function Alerts() {
   const [channels, setChannels] = useState(notificationChannels);
   const [isRunning, setIsRunning] = useState(false);
 
-  const { data: alertsRaw = [] } = useAlerts();
+  const { data: alertsRaw = [], isLoading: alertsLoading } = useAlerts();
   const { data: rulesRaw = [] } = useAlertRules();
+  const { data: alertSummary } = useAlertSummary();
 
   const alerts = useMemo<DisplayAlert[]>(
     () =>
@@ -123,7 +126,11 @@ export default function Alerts() {
             attritionProbability: 0,
             status: 'active',
           },
-          reason: String(alert.reason ?? ''),
+          reason: employee
+            ? alert.reason?.toLowerCase().includes('satisfaction')
+              ? String(alert.reason)
+              : `Attrition risk at ${employee.attritionProbability}%`
+            : String(alert.reason ?? ''),
           triggeredAt: alert.triggeredAt
             ? new Date(String(alert.triggeredAt)).toLocaleString()
             : '—',
@@ -147,10 +154,18 @@ export default function Alerts() {
   );
 
   const alertCounts = {
-    critical: alerts.filter((a) => a.type === 'critical').length,
-    warning: alerts.filter((a) => a.type === 'warning').length,
-    pending: alerts.filter((a) => a.status === 'active' || a.status === 'pending').length,
-    resolved: alerts.filter((a) => a.status === 'resolved').length,
+    critical: alertSummary?.critical ?? alerts.filter((a) => a.type === 'critical' && a.status !== 'resolved').length,
+    warning: alertSummary?.warning ?? alerts.filter((a) => a.type === 'warning' && a.status !== 'resolved').length,
+    pending: alertSummary?.pending ?? alerts.filter((a) => a.status === 'active' || a.status === 'pending' || a.status === 'acknowledged').length,
+    resolved: alertSummary?.resolvedToday ?? alerts.filter((a) => a.status === 'resolved').length,
+  };
+
+  const refetchAlerts = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.alerts }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.alertSummary }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.alertRules }),
+    ]);
   };
 
   const handleRunDetection = async () => {
@@ -158,10 +173,10 @@ export default function Alerts() {
     toast.loading('Running detection algorithm...', { id: 'detection' });
     try {
       const result = await api.alerts.detect();
-      await queryClient.invalidateQueries({ queryKey: queryKeys.alerts });
+      await refetchAlerts();
       toast.success('Detection complete', {
         id: 'detection',
-        description: `Created ${result.alertsCreated} new alert(s)`,
+        description: `Created ${result.alertsCreated} · updated ${result.alertsUpdated ?? 0} · resolved ${result.alertsResolved ?? 0}`,
       });
     } catch {
       toast.error('Detection failed', { id: 'detection' });
@@ -174,7 +189,7 @@ export default function Alerts() {
     const alert = alerts.find((a) => a.id === alertId);
     try {
       await api.alerts.acknowledge(alertId);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.alerts });
+      await refetchAlerts();
       toast.success('Alert acknowledged', {
         description: `${alert?.employee.firstName} ${alert?.employee.lastName}`,
       });
@@ -192,9 +207,13 @@ export default function Alerts() {
           <p className="text-muted-foreground">Proactive alerts and escalation management</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={refetchAlerts} disabled={alertsLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${alertsLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
           <Button 
             variant="outline"
-            onClick={() => toast.info('Opening alert rules configuration')}
+            onClick={() => toast.info('Use the Alert Rules tab to enable or disable detection rules')}
           >
             <Settings className="h-4 w-4 mr-2" />
             Configure Rules
@@ -208,6 +227,15 @@ export default function Alerts() {
           </Button>
         </div>
       </div>
+
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>How this works</AlertTitle>
+        <AlertDescription>
+          Alerts are generated from your ML risk scores and configured rules (≥80% attrition or satisfaction &lt; 5).
+          After <strong>Train &amp; Run Predictions</strong>, click <strong>Run Detection</strong> to create, update, or auto-resolve alerts.
+        </AlertDescription>
+      </Alert>
 
       {/* Overview Cards */}
       <div className="grid md:grid-cols-4 gap-4">
@@ -300,7 +328,12 @@ export default function Alerts() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {alerts.map((alert) => (
+                    {alerts.length === 0 && !alertsLoading ? (
+                      <p className="text-sm text-muted-foreground text-center py-12">
+                        No active alerts. Run detection after updating predictions.
+                      </p>
+                    ) : (
+                    alerts.map((alert) => (
                       <div
                         key={alert.id}
                         onClick={() => setSelectedAlert(alert.id)}
@@ -350,7 +383,8 @@ export default function Alerts() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -479,8 +513,14 @@ export default function Alerts() {
                       <div className="flex items-center gap-3">
                         <Switch 
                           checked={rule.enabled}
-                          onCheckedChange={(checked) => {
-                            toast.success(`${rule.name} ${checked ? 'enabled' : 'disabled'}`);
+                          onCheckedChange={async (checked) => {
+                            try {
+                              await api.alerts.updateRule(rule.id, { enabled: checked });
+                              await queryClient.invalidateQueries({ queryKey: queryKeys.alertRules });
+                              toast.success(`${rule.name} ${checked ? 'enabled' : 'disabled'}`);
+                            } catch {
+                              toast.error('Failed to update rule');
+                            }
                           }}
                         />
                         <div>

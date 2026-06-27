@@ -18,6 +18,8 @@ class EmployeeOut(CamelModel):
     position: str
     hire_date: date
     salary: Decimal
+    currency: str = "RWF"
+    pay_frequency: str = "monthly"
     age: int
     gender: str
     years_at_company: int
@@ -42,6 +44,8 @@ class EmployeeCreate(CamelModel):
     position: str
     hire_date: date
     salary: Decimal
+    currency: str = "RWF"
+    pay_frequency: str = "monthly"
     age: int
     gender: str
     years_at_company: int = 0
@@ -62,6 +66,8 @@ class EmployeeUpdate(CamelModel):
     position: str | None = None
     hire_date: date | None = None
     salary: Decimal | None = None
+    currency: str | None = None
+    pay_frequency: str | None = None
     age: int | None = None
     gender: str | None = None
     years_at_company: int | None = None

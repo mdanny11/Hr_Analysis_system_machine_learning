@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 import { api } from '@/services/api';
+import { ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/hooks/useApi';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -141,6 +142,7 @@ export default function UserManagement() {
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [pendingAccessRequests, setPendingAccessRequests] = useState(0);
   const [activeTab, setActiveTab] = useState('users');
 
@@ -197,6 +199,19 @@ export default function UserManagement() {
     const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
     return matchesSearch && matchesRole && matchesStatus;
   });
+
+  const handleExportUsers = async () => {
+    setIsExporting(true);
+    try {
+      await api.users.export();
+      toast.success('Users exported', { description: 'Downloaded users_export.csv' });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Export failed';
+      toast.error('Export failed', { description: message });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleCreateUser = async () => {
     if (!newUser.email || !newUser.name || !newUser.password) {
@@ -283,8 +298,15 @@ export default function UserManagement() {
     }
   };
 
-  const handleToggleStatus = (userId: string) => {
-    toast.info('Status toggling not persisted in this demo');
+  const handleToggleStatus = async (user: SystemUser) => {
+    const nextStatus = user.status === 'active' ? 'inactive' : 'active';
+    try {
+      await api.users.update(user.id, { status: nextStatus });
+      await refreshUsers();
+      toast.success(`User ${nextStatus === 'active' ? 'activated' : 'deactivated'}`);
+    } catch {
+      toast.error('Failed to update user status');
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -536,10 +558,11 @@ export default function UserManagement() {
             <Button
               variant="outline"
               className="gap-2 border-white/10 text-white/70 hover:text-white"
-              onClick={() => toast.success('Exporting users', { description: `Downloading ${filteredUsers.length} users to CSV...` })}
+              disabled={isExporting}
+              onClick={handleExportUsers}
             >
               <Download className="h-4 w-4" />
-              Export
+              {isExporting ? 'Exporting...' : 'Export'}
             </Button>
           </div>
         </CardContent>
@@ -656,7 +679,7 @@ export default function UserManagement() {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-white/80 focus:text-white focus:bg-white/10 gap-2"
-                              onClick={() => handleToggleStatus(user.id)}
+                              onClick={() => handleToggleStatus(user)}
                             >
                               <RefreshCw className="h-4 w-4" />
                               {user.status === 'active' ? 'Deactivate' : 'Activate'}

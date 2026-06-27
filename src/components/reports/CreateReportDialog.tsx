@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { X, Eye, Save, Download, FileText, BarChart3, TrendingUp, PieChart } from 'lucide-react';
+import { Eye, Save, Download, FileText, BarChart3, TrendingUp, PieChart } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { api } from '@/services/api';
+import { ApiError } from '@/lib/apiClient';
 
 interface CreateReportDialogProps {
   open: boolean;
@@ -44,6 +46,11 @@ const availableMetrics = [
   'Prediction Accuracy',
 ];
 
+interface PreviewData {
+  kpis: Record<string, number>;
+  departments: Array<Record<string, string | number>>;
+}
+
 export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogProps) {
   const [reportName, setReportName] = useState('');
   const [reportType, setReportType] = useState('');
@@ -51,20 +58,23 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
   const [endDate, setEndDate] = useState('2024-01-31');
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([
     'Attrition Rate',
-    'Risk Distribution'
+    'Risk Distribution',
   ]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [previewGenerated, setPreviewGenerated] = useState(false);
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
 
   const toggleMetric = (metric: string) => {
     if (selectedMetrics.includes(metric)) {
-      setSelectedMetrics(selectedMetrics.filter(m => m !== metric));
+      setSelectedMetrics(selectedMetrics.filter((m) => m !== metric));
     } else {
       setSelectedMetrics([...selectedMetrics, metric]);
     }
   };
 
-  const handleGeneratePreview = () => {
+  const handleGeneratePreview = async () => {
     if (!reportName) {
       toast.error('Please enter a report name');
       return;
@@ -73,29 +83,69 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
       toast.error('Please select a report type');
       return;
     }
-    
+
     setIsGenerating(true);
-    setTimeout(() => {
-      setIsGenerating(false);
-      setPreviewGenerated(true);
-      toast.success('Preview generated (prototype)', {
-        description: 'Report preview is ready'
+    try {
+      const preview = await api.reports.preview({
+        name: reportName,
+        type: reportType,
+        dateRangeStart: startDate,
+        dateRangeEnd: endDate,
+        metrics: selectedMetrics,
       });
-    }, 1500);
+      setPreviewData(preview);
+      setPreviewGenerated(true);
+      toast.success('Preview generated', { description: 'Report preview is ready' });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Preview failed';
+      toast.error('Preview failed', { description: message });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleSaveReport = () => {
-    toast.success('Report saved successfully (prototype)', {
-      description: `"${reportName}" has been saved to your reports`
-    });
-    onOpenChange(false);
-    resetForm();
+  const handleSaveReport = async () => {
+    if (!reportName || !reportType) return;
+    setIsSaving(true);
+    try {
+      await api.reports.create({
+        name: reportName,
+        type: reportType,
+        dateRangeStart: startDate,
+        dateRangeEnd: endDate,
+        metrics: { selected: selectedMetrics },
+      });
+      toast.success('Report saved successfully', {
+        description: `"${reportName}" has been saved to your reports`,
+      });
+      onOpenChange(false);
+      resetForm();
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Save failed';
+      toast.error('Save failed', { description: message });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleExport = () => {
-    toast.info('Export disabled (prototype)', {
-      description: 'This feature would export the report in your chosen format'
-    });
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await api.reports.export({
+        reportName,
+        reportType,
+        startDate,
+        endDate,
+        sections: 'Executive Summary,Risk Analysis,Department Breakdown,Recommendations',
+        format: 'csv',
+      });
+      toast.success('Report exported', { description: `"${reportName}" downloaded as CSV` });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Export failed';
+      toast.error('Export failed', { description: message });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const resetForm = () => {
@@ -103,12 +153,12 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
     setReportType('');
     setSelectedMetrics(['Attrition Rate', 'Risk Distribution']);
     setPreviewGenerated(false);
+    setPreviewData(null);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto glass-card border-white/10 p-0 data-[state=open]:animate-scale-in data-[state=closed]:animate-scale-out">
-        {/* Header */}
         <DialogHeader className="p-6 pb-4 border-b border-white/10">
           <DialogTitle className="text-xl font-semibold text-white">
             Create New HR Report
@@ -118,17 +168,14 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
           </DialogDescription>
         </DialogHeader>
 
-        {/* Body */}
         <div className="p-6">
           <div className="grid lg:grid-cols-5 gap-6">
-            {/* Configuration Panel */}
             <div className="lg:col-span-2 space-y-6">
               <Card className="glass-card border-white/10">
                 <CardHeader className="pb-4">
                   <CardTitle className="text-base text-white">Report Configuration</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Report Name */}
                   <div className="space-y-2">
                     <Label className="text-white/80">Report Name</Label>
                     <Input
@@ -139,7 +186,6 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                     />
                   </div>
 
-                  {/* Report Type */}
                   <div className="space-y-2">
                     <Label className="text-white/80">Report Type</Label>
                     <Select value={reportType} onValueChange={setReportType}>
@@ -162,7 +208,6 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                     </Select>
                   </div>
 
-                  {/* Time Range */}
                   <div className="space-y-2">
                     <Label className="text-white/80">Time Range</Label>
                     <div className="grid grid-cols-2 gap-2">
@@ -181,7 +226,6 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                     </div>
                   </div>
 
-                  {/* Metrics Selection */}
                   <div className="space-y-2">
                     <Label className="text-white/80">Metrics</Label>
                     <div className="flex flex-wrap gap-2">
@@ -204,7 +248,7 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                 </CardContent>
               </Card>
 
-              <Button 
+              <Button
                 onClick={handleGeneratePreview}
                 disabled={isGenerating}
                 className="w-full bg-primary hover:bg-primary/90 text-white"
@@ -223,32 +267,29 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
               </Button>
             </div>
 
-            {/* Preview Panel */}
             <div className="lg:col-span-3">
               <Card className="glass-card border-white/10 h-full">
                 <CardHeader className="pb-4">
                   <CardTitle className="text-base text-white">Preview</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {previewGenerated ? (
+                  {previewGenerated && previewData ? (
                     <div className="space-y-4">
-                      {/* Placeholder KPIs */}
                       <div className="grid grid-cols-3 gap-3">
                         <div className="p-3 rounded-lg bg-white/5 text-center">
-                          <p className="text-2xl font-bold text-primary">12.5%</p>
+                          <p className="text-2xl font-bold text-primary">{previewData.kpis.attritionRate}%</p>
                           <p className="text-xs text-white/60">Attrition Rate</p>
                         </div>
                         <div className="p-3 rounded-lg bg-white/5 text-center">
-                          <p className="text-2xl font-bold text-success">7.2</p>
+                          <p className="text-2xl font-bold text-success">{previewData.kpis.avgSatisfaction}</p>
                           <p className="text-xs text-white/60">Engagement</p>
                         </div>
                         <div className="p-3 rounded-lg bg-white/5 text-center">
-                          <p className="text-2xl font-bold text-warning">28</p>
+                          <p className="text-2xl font-bold text-warning">{previewData.kpis.highRiskCount}</p>
                           <p className="text-xs text-white/60">High Risk</p>
                         </div>
                       </div>
 
-                      {/* Placeholder Chart */}
                       <div className="h-48 rounded-lg bg-white/5 flex items-center justify-center border border-white/10">
                         <div className="text-center">
                           <BarChart3 className="h-12 w-12 mx-auto text-white/20 mb-2" />
@@ -257,22 +298,24 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                         </div>
                       </div>
 
-                      {/* Placeholder Table */}
                       <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
                         <div className="grid grid-cols-4 gap-2 p-3 bg-white/5 text-xs text-white/60 font-medium">
                           <span>Department</span>
                           <span>Employees</span>
                           <span>Risk</span>
-                          <span>Trend</span>
+                          <span>Attrition</span>
                         </div>
-                        {['Engineering', 'Sales', 'Marketing'].map((dept) => (
-                          <div key={dept} className="grid grid-cols-4 gap-2 p-3 text-sm text-white/80 border-t border-white/5">
-                            <span>{dept}</span>
-                            <span>{Math.floor(Math.random() * 50) + 20}</span>
+                        {previewData.departments.map((dept) => (
+                          <div
+                            key={String(dept.fullName)}
+                            className="grid grid-cols-4 gap-2 p-3 text-sm text-white/80 border-t border-white/5"
+                          >
+                            <span>{dept.fullName}</span>
+                            <span>{dept.employeeCount}</span>
                             <Badge variant="outline" className="w-fit text-xs">
-                              {['Low', 'Medium', 'High'][Math.floor(Math.random() * 3)]}
+                              {Number(dept.avgRisk) >= 60 ? 'High' : Number(dept.avgRisk) >= 30 ? 'Medium' : 'Low'}
                             </Badge>
-                            <span className="text-success">↓ 2.1%</span>
+                            <span>{dept.attritionRate}%</span>
                           </div>
                         ))}
                       </div>
@@ -282,7 +325,7 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
                       <div className="text-center">
                         <FileText className="h-16 w-16 mx-auto text-white/10 mb-4" />
                         <p className="text-white/40">Configure your report and click</p>
-                        <p className="text-white/40">"Generate Preview" to see results</p>
+                        <p className="text-white/40">&quot;Generate Preview&quot; to see results</p>
                       </div>
                     </div>
                   )}
@@ -292,31 +335,30 @@ export function CreateReportDialog({ open, onOpenChange }: CreateReportDialogPro
           </div>
         </div>
 
-        {/* Footer */}
         <div className="p-6 pt-4 border-t border-white/10 flex gap-3 justify-end">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             onClick={() => { onOpenChange(false); resetForm(); }}
             className="text-white/60 hover:text-white hover:bg-white/10"
           >
             Cancel
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleExport}
-            disabled={!previewGenerated}
+            disabled={!previewGenerated || isExporting}
             className="glass-button border-white/20 text-white/80"
           >
             <Download className="h-4 w-4 mr-2" />
-            Export
+            {isExporting ? 'Exporting...' : 'Export'}
           </Button>
-          <Button 
+          <Button
             onClick={handleSaveReport}
-            disabled={!previewGenerated}
+            disabled={!previewGenerated || isSaving}
             className="bg-primary hover:bg-primary/90 text-white"
           >
             <Save className="h-4 w-4 mr-2" />
-            Save Report
+            {isSaving ? 'Saving...' : 'Save Report'}
           </Button>
         </div>
       </DialogContent>

@@ -52,6 +52,8 @@ class Employee(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     position: Mapped[str] = mapped_column(String(255), nullable=False)
     hire_date: Mapped[date] = mapped_column(Date, nullable=False)
     salary: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), default="RWF", nullable=False)
+    pay_frequency: Mapped[str] = mapped_column(String(32), default="monthly", nullable=False)
     age: Mapped[int] = mapped_column(Integer, nullable=False)
     gender: Mapped[str] = mapped_column(String(32), nullable=False)
     years_at_company: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -41,16 +41,16 @@ export default function Login() {
       return;
     }
 
-    const success = await login(email, password, role);
+    const result = await login(email, password, role);
     
-    if (success) {
+    if (result.success) {
       toast.success('Welcome back!', {
         description: `Logged in as ${role.replace('-', ' ')}`,
       });
       navigate('/dashboard');
     } else {
       toast.error('Login failed', {
-        description: 'Please check your credentials and try again',
+        description: result.message || 'Please check your credentials and try again',
       });
     }
   };
@@ -191,7 +191,7 @@ export default function Login() {
                 Select Role
               </Label>
               <Select value={role} onValueChange={(value: UserRole) => setRole(value)}>
-                <SelectTrigger className="h-12 bg-white/10 border-white/20 text-white rounded-xl focus:border-white/40 focus:ring-white/20 [&>svg]:text-white/60">
+                <SelectTrigger id="role" className="h-12 bg-white/10 border-white/20 text-white rounded-xl focus:border-white/40 focus:ring-white/20 [&>svg]:text-white/60">
                   <SelectValue placeholder="Select your role" />
                 </SelectTrigger>
                 <SelectContent className="bg-[hsl(240,30%,20%)] border-white/20 backdrop-blur-xl">
@@ -295,7 +295,7 @@ export default function Login() {
 
         {/* Demo hint - subtle */}
         <p className="mt-4 text-center text-xs text-white/40">
-          Demo: use any email with 6+ character password
+          Demo: admin@ison.com / password123 (role is determined by your account)
         </p>
       </div>
     </div>

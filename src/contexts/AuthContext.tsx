@@ -57,7 +57,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string, role: UserRole) => Promise<boolean>;
+  login: (email: string, password: string, role: UserRole) => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
 }
@@ -87,17 +87,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     restoreSession();
   }, []);
 
-  const login = useCallback(async (email: string, password: string, _role: UserRole): Promise<boolean> => {
+  const login = useCallback(async (email: string, password: string, _role: UserRole) => {
     setIsLoading(true);
     try {
       const data = await api.auth.login(email, password);
       setUser(data.user);
-      return true;
+      return { success: true };
     } catch (error) {
-      if (error instanceof ApiError) {
-        console.error('Login failed:', error.message);
-      }
-      return false;
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : 'Login failed. Please check your credentials and try again.';
+      return { success: false, message };
     } finally {
       setIsLoading(false);
     }

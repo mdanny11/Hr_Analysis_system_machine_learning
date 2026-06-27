@@ -1,7 +1,17 @@
 import { useState, useMemo } from 'react';
-import { useInterventionQueue, useRetentionStrategies } from '@/hooks/useApi';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  useActionItems,
+  useInterventionQueue,
+  useRetentionStrategies,
+  useSuccessionPlanning,
+  useRiskSummary,
+  queryKeys,
+} from '@/hooks/useApi';
 import type { Employee } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -26,6 +36,8 @@ import {
   Calendar,
   MessageSquare,
   BarChart3,
+  Info,
+  RefreshCw,
 } from 'lucide-react';
 import {
   BarChart,
@@ -41,6 +53,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { DEFAULT_CURRENCY, formatCurrency, formatCurrencyCompact, formatCurrencyMillions } from '@/lib/currency';
 
 const categoryIcons: Record<string, typeof GraduationCap> = {
   development: GraduationCap,
@@ -56,28 +69,64 @@ const categoryImpact: Record<string, 'high' | 'medium' | 'low'> = {
 
 const suggestedActions = ['Career Development', 'Salary Review', 'Manager Meeting', 'Flexible Schedule'];
 
-const successionCandidates = [
-  { role: 'Engineering Lead', current: 'John Smith', candidates: ['Sarah Chen', 'Mike Johnson', 'Lisa Park'], readiness: [85, 72, 68] },
-  { role: 'Sales Director', current: 'Emily Davis', candidates: ['Tom Wilson', 'Anna Lee'], readiness: [78, 65] },
-  { role: 'HR Manager', current: 'Robert Brown', candidates: ['Jessica Martinez', 'David Kim', 'Rachel Green'], readiness: [92, 80, 75] },
-];
-
-const actionItems = [
-  { id: 1, task: 'Schedule 1:1 with James Wilson', assignee: 'HR Manager', due: '2024-01-22', status: 'pending', employee: 'James Wilson' },
-  { id: 2, task: 'Prepare salary adjustment proposal', assignee: 'HR Director', due: '2024-01-23', status: 'in-progress', employee: 'Sarah Chen' },
-  { id: 3, task: 'Review career development plan', assignee: 'Department Head', due: '2024-01-24', status: 'completed', employee: 'Mike Johnson' },
-  { id: 4, task: 'Implement flexible schedule', assignee: 'Team Lead', due: '2024-01-25', status: 'pending', employee: 'Lisa Park' },
-  { id: 5, task: 'Follow-up on wellness program enrollment', assignee: 'HR Coordinator', due: '2024-01-26', status: 'in-progress', employee: 'Tom Wilson' },
-];
-
-const COLORS = ['hsl(var(--success))', 'hsl(var(--warning))', 'hsl(var(--destructive))'];
+const COLORS = ['hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(4, 79%, 55%)'];
+const CHART_PRIMARY = 'hsl(235, 60%, 55%)';
+const CHART_SUCCESS = 'hsl(142, 71%, 45%)';
+const CHART_DANGER = 'hsl(4, 79%, 55%)';
 
 export default function Decisions() {
+  const queryClient = useQueryClient();
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
   const [interventionNotes, setInterventionNotes] = useState('');
 
-  const { data: strategiesRaw = [] } = useRetentionStrategies();
-  const { data: queueRaw = [] } = useInterventionQueue();
+  const strategiesQuery = useRetentionStrategies();
+  const queueQuery = useInterventionQueue();
+  const successionQuery = useSuccessionPlanning();
+  const actionItemsQuery = useActionItems();
+  const riskSummaryQuery = useRiskSummary();
+
+  const strategiesRaw = strategiesQuery.data ?? [];
+  const queueRaw = queueQuery.data ?? [];
+  const successionRaw = successionQuery.data ?? [];
+  const actionItemsRaw = actionItemsQuery.data ?? [];
+  const riskSummary = riskSummaryQuery.data;
+
+  const isLoading = [strategiesQuery, queueQuery, successionQuery, actionItemsQuery].some((q) => q.isLoading);
+
+  const refetchDecisions = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.retentionStrategies }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.interventionQueue }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.successionPlanning }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.actionItems }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.riskSummary }),
+    ]);
+    toast.success('Decision support data refreshed');
+  };
+
+  const actionItems = useMemo(
+    () =>
+      actionItemsRaw.map((item) => ({
+        id: item.id,
+        task: item.title,
+        assignee: item.assignee ?? 'Unassigned',
+        due: item.dueDate ? new Date(item.dueDate).toLocaleDateString() : 'No due date',
+        status: item.status,
+        employee: item.employee ?? 'General',
+      })),
+    [actionItemsRaw],
+  );
+
+  const successionCandidates = useMemo(
+    () =>
+      successionRaw.map((role) => ({
+        role: role.targetRole,
+        current: role.currentIncumbent ?? 'Not specified',
+        candidates: role.candidates.map((c) => c.name),
+        readiness: role.candidates.map((c) => c.readinessScore),
+      })),
+    [successionRaw],
+  );
 
   const retentionStrategies = useMemo(
     () =>
@@ -90,12 +139,12 @@ export default function Decisions() {
           icon: categoryIcons[category] ?? Lightbulb,
           impact: categoryImpact[category] ?? 'medium',
           cost,
-          targetEmployees: Math.max(1, Math.round(cost / 1000)),
+          targetEmployees: Number(s.targetEmployeeCount ?? 0) || Math.max(1, Math.round((riskSummary?.highRisk ?? queueRaw.length) * 0.5)),
           expectedRetention: Number(s.successRate ?? 0),
           description: String(s.description ?? ''),
         };
       }),
-    [strategiesRaw],
+    [strategiesRaw, riskSummary?.highRisk, queueRaw.length],
   );
 
   const interventionQueue = useMemo(
@@ -113,15 +162,22 @@ export default function Decisions() {
     () =>
       retentionStrategies.map((s) => ({
         strategy: s.name.split(' ')[0],
-        cost: Math.round(s.cost / 1000),
-        benefit: Math.round((s.cost * s.expectedRetention) / 1000),
+        cost: Math.round(s.cost / 1_000_000),
+        benefit: Math.round((s.cost * s.expectedRetention) / 100_000_000),
         roi: Math.round(s.expectedRetention * 2),
       })),
     [retentionStrategies],
   );
 
-  const totalBudget = 125000;
   const allocatedBudget = retentionStrategies.reduce((sum, s) => sum + s.cost, 0);
+  const totalBudget = Math.max(125_000_000, Math.round(allocatedBudget * 1.2));
+  const projectedRetention = useMemo(() => {
+    if (!retentionStrategies.length) return 0;
+    const totalCost = retentionStrategies.reduce((sum, s) => sum + s.cost, 0);
+    if (totalCost === 0) return 0;
+    const weighted = retentionStrategies.reduce((sum, s) => sum + s.expectedRetention * s.cost, 0);
+    return Math.round(weighted / totalCost);
+  }, [retentionStrategies]);
 
   return (
     <div className="space-y-6">
@@ -132,6 +188,10 @@ export default function Decisions() {
           <p className="text-muted-foreground">Data-driven retention strategies and interventions</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={refetchDecisions} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
           <Button variant="outline">
             <BarChart3 className="h-4 w-4 mr-2" />
             View Reports
@@ -143,6 +203,16 @@ export default function Decisions() {
         </div>
       </div>
 
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>How this works</AlertTitle>
+        <AlertDescription>
+          Decisions uses your ML risk scores from Predictions. The <strong>Intervention Queue</strong> lists the top 20
+          employees at ≥70% attrition probability. Retention strategies show estimated RWF costs and target counts based
+          on your current high-risk population ({riskSummary?.highRisk ?? '—'} employees).
+        </AlertDescription>
+      </Alert>
+
       {/* Overview Cards */}
       <div className="grid md:grid-cols-4 gap-4">
         <Card>
@@ -152,8 +222,9 @@ export default function Decisions() {
                 <AlertTriangle className="h-5 w-5 text-destructive" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{interventionQueue.length}</p>
+                <p className="text-2xl font-bold">{isLoading ? '…' : interventionQueue.length}</p>
                 <p className="text-sm text-muted-foreground">Pending Interventions</p>
+                <p className="text-xs text-muted-foreground">Top 20 at ≥70% risk</p>
               </div>
             </div>
           </CardContent>
@@ -180,7 +251,7 @@ export default function Decisions() {
                 <DollarSign className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${(allocatedBudget / 1000).toFixed(0)}k</p>
+                <p className="text-2xl font-bold">{formatCurrencyCompact(allocatedBudget)}</p>
                 <p className="text-sm text-muted-foreground">Budget Allocated</p>
               </div>
             </div>
@@ -194,8 +265,9 @@ export default function Decisions() {
                 <TrendingUp className="h-5 w-5 text-warning" />
               </div>
               <div>
-                <p className="text-2xl font-bold">78%</p>
+                <p className="text-2xl font-bold">{isLoading ? '…' : `${projectedRetention}%`}</p>
                 <p className="text-sm text-muted-foreground">Projected Retention</p>
+                <p className="text-xs text-muted-foreground">Cost-weighted strategy success</p>
               </div>
             </div>
           </CardContent>
@@ -256,7 +328,7 @@ export default function Decisions() {
                             <div className="grid grid-cols-3 gap-4 text-sm">
                               <div>
                                 <p className="text-muted-foreground">Cost</p>
-                                <p className="font-medium">${strategy.cost.toLocaleString()}</p>
+                                <p className="font-medium">{formatCurrency(strategy.cost)}</p>
                               </div>
                               <div>
                                 <p className="text-muted-foreground">Target Employees</p>
@@ -286,11 +358,11 @@ export default function Decisions() {
                   <div>
                     <div className="flex justify-between text-sm mb-2">
                       <span>Total Budget</span>
-                      <span className="font-medium">${totalBudget.toLocaleString()}</span>
+                      <span className="font-medium">{formatCurrency(totalBudget)}</span>
                     </div>
                     <Progress value={(allocatedBudget / totalBudget) * 100} className="h-3" />
                     <p className="text-xs text-muted-foreground mt-1">
-                      ${allocatedBudget.toLocaleString()} allocated ({Math.round((allocatedBudget / totalBudget) * 100)}%)
+                      {formatCurrency(allocatedBudget)} allocated ({Math.round((allocatedBudget / totalBudget) * 100)}%)
                     </p>
                   </div>
 
@@ -298,7 +370,7 @@ export default function Decisions() {
                     {retentionStrategies.map((s) => (
                       <div key={s.id} className="flex items-center justify-between">
                         <span className="text-sm">{s.name}</span>
-                        <span className="text-sm font-medium">${(s.cost / 1000).toFixed(0)}k</span>
+                        <span className="text-sm font-medium">{formatCurrencyCompact(s.cost)}</span>
                       </div>
                     ))}
                   </div>
@@ -404,7 +476,7 @@ export default function Decisions() {
             <Card>
               <CardHeader>
                 <CardTitle>Cost vs Benefit Analysis</CardTitle>
-                <CardDescription>ROI comparison of retention strategies (in thousands)</CardDescription>
+                <CardDescription>ROI comparison of retention strategies (in millions of {DEFAULT_CURRENCY})</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="h-[350px]">
@@ -420,8 +492,8 @@ export default function Decisions() {
                           borderRadius: '8px',
                         }}
                       />
-                      <Bar dataKey="cost" fill="hsl(var(--destructive))" name="Cost ($k)" />
-                      <Bar dataKey="benefit" fill="hsl(var(--success))" name="Benefit ($k)" />
+                      <Bar dataKey="cost" fill={CHART_DANGER} name={`Cost (${DEFAULT_CURRENCY} M)`} />
+                      <Bar dataKey="benefit" fill={CHART_SUCCESS} name={`Benefit (${DEFAULT_CURRENCY} M)`} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -450,9 +522,9 @@ export default function Decisions() {
                       <Line
                         type="monotone"
                         dataKey="roi"
-                        stroke="hsl(var(--primary))"
+                        stroke={CHART_PRIMARY}
                         strokeWidth={3}
-                        dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 6 }}
+                        dot={{ fill: CHART_PRIMARY, strokeWidth: 2, r: 6 }}
                         name="ROI %"
                       />
                     </LineChart>
@@ -474,6 +546,11 @@ export default function Decisions() {
               <CardDescription>Talent pipeline for critical roles</CardDescription>
             </CardHeader>
             <CardContent>
+              {successionQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading succession pipeline…</p>
+              ) : successionCandidates.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No succession candidates configured yet.</p>
+              ) : (
               <div className="space-y-6">
                 {successionCandidates.map((role, i) => (
                   <div key={i} className="p-4 rounded-lg border">
@@ -524,6 +601,7 @@ export default function Decisions() {
                   </div>
                 ))}
               </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -536,6 +614,11 @@ export default function Decisions() {
               <CardDescription>Monitor progress of retention interventions</CardDescription>
             </CardHeader>
             <CardContent>
+              {actionItemsQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading action items…</p>
+              ) : actionItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No action items yet.</p>
+              ) : (
               <div className="space-y-3">
                 {actionItems.map((item) => (
                   <div
@@ -571,6 +654,7 @@ export default function Decisions() {
                   </div>
                 ))}
               </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
